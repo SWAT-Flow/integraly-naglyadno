@@ -1,4 +1,4 @@
-﻿import { X_LIMITS } from "../constants.js";
+import { X_LIMITS } from "../constants.js";
 import { asFinite, clamp } from "../math/numeric.js";
 const TOOL_MODES = ["none", "under", "between", "riemann", "trap", "volume"];
 const SAMPLE_MODES = ["left", "mid", "right"];

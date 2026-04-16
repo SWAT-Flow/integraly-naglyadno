@@ -80,25 +80,82 @@ export function IconButton({ label, onClick, disabled = false, children }: IconB
 interface SelectFieldProps {
   label: string;
   value: string;
-  options: Array<{ label: string; value: string }>;
+  options: Array<{ label: string; value: string; render?: ReactNode; selectedRender?: ReactNode }>;
   onChange: (value: string) => void;
   disabled?: boolean;
-  preview?: ReactNode;
 }
 
-export function SelectField({ label, value, options, onChange, disabled = false, preview }: SelectFieldProps) {
+export function SelectField({ label, value, options, onChange, disabled = false }: SelectFieldProps) {
+  const [open, setOpen] = useState(false);
+  const rootRef = useRef<HTMLDivElement>(null);
+  const selectedOption = options.find((option) => option.value === value) ?? options[0] ?? null;
+
+  useEffect(() => {
+    if (!open) {
+      return;
+    }
+
+    const handlePointerDown = (event: PointerEvent) => {
+      if (!rootRef.current?.contains(event.target as Node)) {
+        setOpen(false);
+      }
+    };
+
+    const handleEscape = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        setOpen(false);
+      }
+    };
+
+    globalThis.document?.addEventListener("pointerdown", handlePointerDown);
+    globalThis.window?.addEventListener("keydown", handleEscape);
+
+    return () => {
+      globalThis.document?.removeEventListener("pointerdown", handlePointerDown);
+      globalThis.window?.removeEventListener("keydown", handleEscape);
+    };
+  }, [open]);
+
   return (
-    <label className="field">
+    <div ref={rootRef} className="field select-field">
       <span>{decodeEscapedUnicode(label)}</span>
-      <select disabled={disabled} value={value} onChange={(event) => onChange(event.target.value)}>
-        {options.map((option) => (
-          <option key={option.value} value={option.value}>
-            {decodeEscapedUnicode(option.label)}
-          </option>
-        ))}
-      </select>
-      {preview ? <div className="field-preview">{preview}</div> : null}
-    </label>
+      <button
+        aria-expanded={open}
+        aria-haspopup="listbox"
+        className="select-trigger"
+        disabled={disabled}
+        onClick={() => setOpen((current) => !current)}
+        title={selectedOption ? decodeEscapedUnicode(selectedOption.label) : undefined}
+        type="button"
+      >
+        <span className="select-value">
+          {selectedOption?.selectedRender ?? selectedOption?.render ?? decodeEscapedUnicode(selectedOption?.label ?? "")}
+        </span>
+        <span className={`select-caret ${open ? "select-caret-open" : ""}`} aria-hidden="true">
+          ▾
+        </span>
+      </button>
+
+      {open ? (
+        <div className="select-menu" role="listbox">
+          {options.map((option) => (
+            <button
+              key={option.value}
+              aria-selected={option.value === value}
+              className={`select-option ${option.value === value ? "select-option-active" : ""}`}
+              onClick={() => {
+                onChange(option.value);
+                setOpen(false);
+              }}
+              title={decodeEscapedUnicode(option.label)}
+              type="button"
+            >
+              {option.render ?? decodeEscapedUnicode(option.label)}
+            </button>
+          ))}
+        </div>
+      ) : null}
+    </div>
   );
 }
 

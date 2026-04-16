@@ -1,4 +1,4 @@
-﻿import { COLORS } from "../constants.js";
+import { COLORS } from "../constants.js";
 import { buildIntervals, findRoots, midpointIntegral, sortAB, uniqueSorted } from "../math/numeric.js";
 import { expressionToTex, formatExpressionText } from "../math/parser.js";
 import { normalizeTool } from "./normalizeTool.js";

@@ -1,4 +1,4 @@
-﻿import { X_LIMITS } from "../constants.js";
+import { X_LIMITS } from "../constants.js";
 export function clamp(value, min, max) {
     return Math.min(max, Math.max(min, value));
 }

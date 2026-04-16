@@ -1,4 +1,4 @@
-﻿export const X_LIMITS = [-1000, 1000];
+export const X_LIMITS = [-1000, 1000];
 export const COLORS = {
     ink: "#0f172a",
     blue: "#2563eb",

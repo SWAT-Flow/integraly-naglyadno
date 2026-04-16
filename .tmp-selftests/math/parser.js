@@ -1,4 +1,4 @@
-﻿import { all, create } from "mathjs";
+import { all, create } from "mathjs";
 const math = create(all, {});
 const CUSTOM_SCOPE = {
     pi: Math.PI,

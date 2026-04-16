@@ -25,10 +25,17 @@ function ExpressionRowComponent({
   onToggleVisible,
   inputRef,
 }: ExpressionRowProps) {
-  const [isEditing, setIsEditing] = useState(active);
+  const [isEditing, setIsEditing] = useState(false);
 
   useLayoutEffect(() => {
-    setIsEditing(active);
+    if (!active) {
+      setIsEditing(false);
+      return;
+    }
+
+    if (editorRequest > 0) {
+      setIsEditing(true);
+    }
   }, [active, editorRequest]);
 
   const visibilityLabel = expression.visible
@@ -66,6 +73,7 @@ function ExpressionRowComponent({
                 setIsEditing(true);
               }}
               placeholder="y = sin(x)"
+              spellCheck={false}
               type="text"
               value={expression.text}
             />
@@ -106,10 +114,6 @@ function ExpressionRowComponent({
           {"\u00d7"}
         </button>
       </div>
-
-      {isEditing && expression.isValid && previewTex ? (
-        <FormulaCard tex={previewTex} displayMode={false} className="expression-preview" />
-      ) : null}
 
       {expression.error ? <div className="expression-error">{decodeEscapedUnicode(expression.error)}</div> : null}
     </div>

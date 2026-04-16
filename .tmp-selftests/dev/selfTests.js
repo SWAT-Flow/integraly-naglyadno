@@ -1,4 +1,4 @@
-﻿import { clampView } from "../math/numeric.js";
+import { clampView } from "../math/numeric.js";
 import { compileExpression, evaluateCompiled, expressionToTex, formatExpressionText, normalizeExpression, } from "../math/parser.js";
 import { buildOverlay } from "../tools/buildOverlay.js";
 import { normalizeTool } from "../tools/normalizeTool.js";
