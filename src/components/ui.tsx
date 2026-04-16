@@ -83,9 +83,10 @@ interface SelectFieldProps {
   options: Array<{ label: string; value: string }>;
   onChange: (value: string) => void;
   disabled?: boolean;
+  preview?: ReactNode;
 }
 
-export function SelectField({ label, value, options, onChange, disabled = false }: SelectFieldProps) {
+export function SelectField({ label, value, options, onChange, disabled = false, preview }: SelectFieldProps) {
   return (
     <label className="field">
       <span>{decodeEscapedUnicode(label)}</span>
@@ -96,6 +97,7 @@ export function SelectField({ label, value, options, onChange, disabled = false 
           </option>
         ))}
       </select>
+      {preview ? <div className="field-preview">{preview}</div> : null}
     </label>
   );
 }

@@ -140,6 +140,40 @@ const SUPERSCRIPT_MAP = {
     "-": "\u207b",
     "+": "\u207a",
 };
+const SUBSCRIPT_MAP = {
+    "0": "\u2080",
+    "1": "\u2081",
+    "2": "\u2082",
+    "3": "\u2083",
+    "4": "\u2084",
+    "5": "\u2085",
+    "6": "\u2086",
+    "7": "\u2087",
+    "8": "\u2088",
+    "9": "\u2089",
+    a: "\u2090",
+    e: "\u2091",
+    h: "\u2095",
+    i: "\u1d62",
+    j: "\u2c7c",
+    k: "\u2096",
+    l: "\u2097",
+    m: "\u2098",
+    n: "\u2099",
+    o: "\u2092",
+    p: "\u209a",
+    r: "\u1d63",
+    s: "\u209b",
+    t: "\u209c",
+    u: "\u1d64",
+    v: "\u1d65",
+    x: "\u2093",
+    "+": "\u208a",
+    "-": "\u208b",
+    "=": "\u208c",
+    "(": "\u208d",
+    ")": "\u208e",
+};
 function rewriteImplicitFunctionCalls(value) {
     let previous = value;
     for (let iteration = 0; iteration < 3; iteration += 1) {
@@ -165,11 +199,38 @@ function suggestOrientationMessage(orientation, normalized) {
     }
     return null;
 }
+function getIncompleteExpressionMessage(normalized) {
+    if (/^(?:asin|acos|atan|asec|acsc|acot|asinh|acosh|atanh|sin|cos|tan|sec|csc|cot|sinh|cosh|tanh|sqrt|abs|exp|ln)\(\s*\)$/i.test(normalized)) {
+        return "\u0412\u0432\u0435\u0434\u0438\u0442\u0435 \u0430\u0440\u0433\u0443\u043c\u0435\u043d\u0442 \u0432\u043d\u0443\u0442\u0440\u0438 \u0441\u043a\u043e\u0431\u043e\u043a.";
+    }
+    if (/^log\(\s*,\s*\)$/i.test(normalized)) {
+        return "\u0412\u0432\u0435\u0434\u0438\u0442\u0435 \u043e\u0441\u043d\u043e\u0432\u0430\u043d\u0438\u0435 \u0438 \u0430\u0440\u0433\u0443\u043c\u0435\u043d\u0442 \u043b\u043e\u0433\u0430\u0440\u0438\u0444\u043c\u0430.";
+    }
+    if (/^log\(\s*[^,()]+\s*,\s*\)$/i.test(normalized) || /^log\(\s*,\s*[^,()]+\s*\)$/i.test(normalized)) {
+        return "\u0417\u0430\u043f\u043e\u043b\u043d\u0438\u0442\u0435 \u043e\u0431\u0430 \u0430\u0440\u0433\u0443\u043c\u0435\u043d\u0442\u0430 \u0432 log(., .).";
+    }
+    return null;
+}
 function toSuperscript(value) {
     return value
         .split("")
         .map((character) => SUPERSCRIPT_MAP[character] ?? character)
         .join("");
+}
+function toSubscript(value) {
+    const normalized = value.replace(/\s+/g, "");
+    if (!normalized) {
+        return null;
+    }
+    let result = "";
+    for (const character of normalized) {
+        const mapped = SUBSCRIPT_MAP[character.toLowerCase()] ?? SUBSCRIPT_MAP[character];
+        if (!mapped) {
+            return null;
+        }
+        result += mapped;
+    }
+    return result;
 }
 function isSymbolNode(node) {
     return node.type === "SymbolNode";
@@ -264,8 +325,13 @@ function renderTextFunction(name, args) {
     if (name === "abs") {
         return args[0] ? `|${renderTextNode(args[0])}|` : "| |";
     }
+    if (name === "log" && args.length === 1) {
+        return `lg ${wrapUnaryTextArgument(args[0])}`;
+    }
     if (name === "log" && args.length === 2) {
-        return `log_{${renderTextNode(args[0])}} ${wrapUnaryTextArgument(args[1])}`;
+        const base = renderTextNode(args[0]);
+        const baseSubscript = toSubscript(base);
+        return `${baseSubscript ? `log${baseSubscript}` : `log_${base}`} ${wrapUnaryTextArgument(args[1])}`;
     }
     const label = FUNCTION_TEXT_LABELS[name] ?? name;
     if (!args.length) {
@@ -282,6 +348,9 @@ function renderTexFunction(name, args) {
     }
     if (name === "abs") {
         return args[0] ? `\\left|${renderTexNode(args[0])}\\right|` : "\\left|\\,\\right|";
+    }
+    if (name === "log" && args.length === 1) {
+        return `\\lg ${wrapUnaryTexArgument(args[0])}`;
     }
     if (name === "log" && args.length === 2) {
         return `\\log_{${renderTexNode(args[0])}} ${wrapUnaryTexArgument(args[1])}`;
@@ -380,6 +449,7 @@ function formatLooseExpressionText(value) {
     display = display.replace(/\babs\s*\(\s*\)/gi, "| |");
     display = display.replace(/\bsqrt\s*\(\s*\)/gi, "\u221a");
     display = display.replace(/\bln\s*\(\s*\)/gi, "ln");
+    display = display.replace(/\blog\s*\(\s*\)/gi, "lg");
     display = display.replace(/\blog\s*\(\s*,\s*\)/gi, "log");
     display = display.replace(/\bexp\s*\(\s*\)/gi, "exp");
     for (const [name, label] of Object.entries(FUNCTION_TEXT_LABELS)) {
@@ -445,6 +515,15 @@ export function compileExpression(text) {
             normalized,
             orientation,
             error: suggestion,
+        };
+    }
+    const incompleteMessage = getIncompleteExpressionMessage(normalized);
+    if (incompleteMessage) {
+        return {
+            ok: false,
+            normalized,
+            orientation,
+            error: incompleteMessage,
         };
     }
     try {

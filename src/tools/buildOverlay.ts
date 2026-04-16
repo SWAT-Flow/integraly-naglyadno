@@ -1,5 +1,6 @@
 import { COLORS } from "../constants";
 import { buildIntervals, findRoots, midpointIntegral, sortAB, uniqueSorted } from "../math/numeric";
+import { expressionToTex, formatExpressionText } from "../math/parser";
 import type {
   CompiledExpression,
   GraphPoint,
@@ -141,6 +142,61 @@ function resolveExpression(
   return expressionMap.get(expressionId) ?? expressions.find((expression) => expression.id === expressionId) ?? null;
 }
 
+interface BetweenSegment {
+  left: number;
+  right: number;
+  topExpression: CompiledExpression;
+  bottomExpression: CompiledExpression;
+  topFn: (x: number) => number;
+  bottomFn: (x: number) => number;
+}
+
+function mergeBetweenSegments(segments: BetweenSegment[]): BetweenSegment[] {
+  if (!segments.length) {
+    return [];
+  }
+
+  const merged: BetweenSegment[] = [segments[0]];
+
+  for (let index = 1; index < segments.length; index += 1) {
+    const current = segments[index];
+    const previous = merged[merged.length - 1];
+
+    if (
+      previous.topExpression.id === current.topExpression.id &&
+      previous.bottomExpression.id === current.bottomExpression.id &&
+      Math.abs(previous.right - current.left) < 1e-6
+    ) {
+      previous.right = current.right;
+      continue;
+    }
+
+    merged.push(current);
+  }
+
+  return merged;
+}
+
+function expressionDisplayLabel(expression: CompiledExpression): string {
+  return `${expression.orientation === "xOfY" ? "x" : "y"} = ${formatExpressionText(expression.normalized)}`;
+}
+
+function buildBetweenFormulaTex(segments: BetweenSegment[]): string | null {
+  if (!segments.length) {
+    return null;
+  }
+
+  return segments
+    .map((segment) => {
+      const left = formatNumber(segment.left, 3);
+      const right = formatNumber(segment.right, 3);
+      const topTex = expressionToTex(segment.topExpression.normalized);
+      const bottomTex = expressionToTex(segment.bottomExpression.normalized);
+      return `\\int_{${left}}^{${right}} \\left(${topTex} - ${bottomTex}\\right)\\,dx`;
+    })
+    .join(" + ");
+}
+
 export function buildOverlay(
   rawTool: Partial<ToolState>,
   validExpressions: CompiledExpression[],
@@ -241,9 +297,11 @@ export function buildOverlay(
       if (expressions.length < 2) {
         return emptyOverlay("\u0414\u043b\u044f \u044d\u0442\u043e\u0433\u043e \u0440\u0435\u0436\u0438\u043c\u0430 \u043d\u0443\u0436\u043d\u044b \u0434\u0432\u0435 \u043a\u043e\u0440\u0440\u0435\u043a\u0442\u043d\u044b\u0435 \u0444\u0443\u043d\u043a\u0446\u0438\u0438.");
       }
-      if (!fnA || !fnB) {
+      if (!expressionA || !expressionB || !fnA || !fnB) {
         return emptyOverlay("\u041d\u0435 \u0443\u0434\u0430\u043b\u043e\u0441\u044c \u0432\u044b\u0431\u0440\u0430\u0442\u044c \u0434\u0432\u0435 \u0444\u0443\u043d\u043a\u0446\u0438\u0438 \u0434\u043b\u044f \u0440\u0435\u0436\u0438\u043c\u0430 \u043c\u0435\u0436\u0434\u0443 \u0433\u0440\u0430\u0444\u0438\u043a\u0430\u043c\u0438.");
       }
+      const expressionANonNull: CompiledExpression = expressionA;
+      const expressionBNonNull: CompiledExpression = expressionB;
 
       const diff = (x: number) => fnA(x) - fnB(x);
       const roots = findRoots(diff, a, b);
@@ -254,6 +312,7 @@ export function buildOverlay(
       ]);
       const intervals = buildIntervals(a, b, uniqueSorted([...roots, ...breaks]));
       const regions: GraphRegion[] = [];
+      const segments: BetweenSegment[] = [];
 
       for (const [left, right] of intervals) {
         const midpoint = (left + right) / 2;
@@ -275,6 +334,14 @@ export function buildOverlay(
           stroke: COLORS.emerald,
           strokeWidth: 1,
         });
+        segments.push({
+          left,
+          right,
+          topExpression: sampleA >= sampleB ? expressionANonNull : expressionBNonNull,
+          bottomExpression: sampleA >= sampleB ? expressionBNonNull : expressionANonNull,
+          topFn,
+          bottomFn,
+        });
       }
 
       const intersections = findRoots(diff, a, b)
@@ -285,8 +352,24 @@ export function buildOverlay(
             : null;
         })
         .filter((point): point is NonNullable<typeof point> => point !== null);
-      const area = midpointIntegral((x) => Math.abs(diff(x)), a, b);
+      const mergedSegments = mergeBetweenSegments(segments);
+      const area = mergedSegments.reduce((sum, segment) => {
+        const contribution = midpointIntegral((x) => {
+          const top = segment.topFn(x);
+          const bottom = segment.bottomFn(x);
+          return Number.isFinite(top) && Number.isFinite(bottom) ? top - bottom : Number.NaN;
+        }, segment.left, segment.right);
+        return Number.isFinite(contribution) ? sum + contribution : sum;
+      }, 0);
       const signedDifference = midpointIntegral(diff, a, b);
+      const orderingMetrics = mergedSegments.map((segment, index) => ({
+        label:
+          mergedSegments.length === 1
+            ? "\u0412\u0435\u0440\u0445\u043d\u0438\u0439 \u0433\u0440\u0430\u0444\u0438\u043a"
+            : `\u0412\u0435\u0440\u0445 \u043d\u0430 [${formatNumber(segment.left, 3)}; ${formatNumber(segment.right, 3)}]`,
+        value: expressionDisplayLabel(segment.topExpression),
+        tone: index % 2 === 0 ? ("blue" as const) : ("violet" as const),
+      }));
 
       return {
         regions,
@@ -304,11 +387,12 @@ export function buildOverlay(
               tone: "blue",
             },
             { label: "\u041f\u0435\u0440\u0435\u0441\u0435\u0447\u0435\u043d\u0438\u044f", value: String(intersections.length), tone: "violet" },
+            ...orderingMetrics,
           ],
           "\u041d\u0430 \u0432\u044b\u0431\u0440\u0430\u043d\u043d\u043e\u043c \u0438\u043d\u0442\u0435\u0440\u0432\u0430\u043b\u0435 \u043d\u0435\u0442 \u043a\u043e\u043d\u0435\u0447\u043d\u043e\u0439 \u043e\u0431\u043b\u0430\u0441\u0442\u0438 \u043c\u0435\u0436\u0434\u0443 \u0433\u0440\u0430\u0444\u0438\u043a\u0430\u043c\u0438.",
           !regions.length && !Number.isFinite(area),
         ),
-        formulaTex: "\\int_a^b |f(x)-g(x)|\\,dx",
+        formulaTex: buildBetweenFormulaTex(mergedSegments),
         volumePreview: null,
       };
     }

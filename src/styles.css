@@ -210,6 +210,16 @@ button {
   padding: 10px 12px;
 }
 
+.field-preview {
+  margin-top: -2px;
+}
+
+.field-formula-preview {
+  padding: 10px 12px;
+  border-radius: 12px;
+  background: #f8fafc;
+}
+
 .field-row {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));

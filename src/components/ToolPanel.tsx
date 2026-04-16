@@ -23,6 +23,15 @@ function expressionOptions(validExpressions: CompiledExpression[]) {
   }));
 }
 
+function expressionPreviewTex(expression: CompiledExpression | null): string | null {
+  if (!expression) {
+    return null;
+  }
+
+  const prefix = expression.orientation === "xOfY" ? "x = " : "y = ";
+  return `${prefix}${expressionToTex(expression.normalized)}`;
+}
+
 function currentFormulaTex(tool: ToolState, validExpressions: CompiledExpression[]): string | null {
   const expressionA = validExpressions.find((expression) => expression.id === tool.exprA) ?? null;
   const expressionB = validExpressions.find((expression) => expression.id === tool.exprB) ?? null;
@@ -37,7 +46,7 @@ function currentFormulaTex(tool: ToolState, validExpressions: CompiledExpression
     case "under":
       return `\\int_{${aTex}}^{${bTex}} ${texA}\\,dx`;
     case "between":
-      return `\\int_{${aTex}}^{${bTex}} \\left|${texA} - ${texB}\\right|\\,dx`;
+      return null;
     case "riemann":
       return `\\sum_{i=1}^{${tool.n}} \\left.${texA}\\right|_{x=\\xi_i}\\,\\Delta x`;
     case "trap":
@@ -55,6 +64,8 @@ function currentFormulaTex(tool: ToolState, validExpressions: CompiledExpression
 export function ToolPanel({ tool, validExpressions, overlay, onChange }: ToolPanelProps) {
   const options = expressionOptions(validExpressions);
   const hasExpressions = validExpressions.length > 0;
+  const expressionA = validExpressions.find((expression) => expression.id === tool.exprA) ?? null;
+  const expressionB = validExpressions.find((expression) => expression.id === tool.exprB) ?? null;
   const formulaTex = currentFormulaTex(tool, validExpressions) ?? overlay.formulaTex;
   const showA =
     tool.mode === "under" ||
@@ -86,6 +97,9 @@ export function ToolPanel({ tool, validExpressions, overlay, onChange }: ToolPan
             label="\u0424\u0443\u043d\u043a\u0446\u0438\u044f A"
             onChange={(value) => onChange({ exprA: value || null })}
             options={options}
+            preview={
+              expressionA ? <FormulaCard tex={expressionPreviewTex(expressionA)} displayMode={false} className="field-formula-preview" /> : null
+            }
             value={hasExpressions ? tool.exprA ?? options[0]?.value ?? "" : ""}
           />
         ) : null}
@@ -96,6 +110,9 @@ export function ToolPanel({ tool, validExpressions, overlay, onChange }: ToolPan
             label="\u0424\u0443\u043d\u043a\u0446\u0438\u044f B"
             onChange={(value) => onChange({ exprB: value || null })}
             options={options}
+            preview={
+              expressionB ? <FormulaCard tex={expressionPreviewTex(expressionB)} displayMode={false} className="field-formula-preview" /> : null
+            }
             value={hasExpressions ? tool.exprB ?? tool.exprA ?? options[0]?.value ?? "" : ""}
           />
         ) : null}
