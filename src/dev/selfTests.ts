@@ -102,6 +102,7 @@ export function runSelfTests(): SelfTestResult[] {
     pass(`expressionToTex renders pi as \\pi`, expressionToTex("pi").includes("\\pi")),
     pass(`expressionToTex renders abs with bars`, expressionToTex("abs(x)").includes("\\left|x\\right|")),
     pass(`expressionToTex renders acos as inverse cosine`, expressionToTex("acos(x)").includes("\\cos^{-1}")),
+    pass(`expressionToTex renders acosh as inverse hyperbolic cosine`, expressionToTex("acosh(x)").includes("\\cosh^{-1}")),
     pass(`formatExpressionText renders abs as bars`, formatExpressionText("abs(x)") === "|x|"),
     pass(
       `formatExpressionText renders sqrt without brackets`,
@@ -110,6 +111,10 @@ export function runSelfTests(): SelfTestResult[] {
     pass(
       `formatExpressionText renders acos as inverse cosine`,
       formatExpressionText("acos(x)") === "cos\u207b\u00b9 x",
+    ),
+    pass(
+      `formatExpressionText renders acosh as inverse hyperbolic cosine`,
+      formatExpressionText("acosh(x)") === "cosh\u207b\u00b9 x",
     ),
     pass(`compileExpression("sin(x)") succeeds`, sinCompiled.ok),
     pass(`compileExpression("sin(") returns an error`, !sinBroken.ok),
