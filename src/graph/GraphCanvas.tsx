@@ -19,6 +19,7 @@ interface GraphCanvasProps {
   expressions: CompiledExpression[];
   overlay: OverlayData;
   defaultView: ViewBox;
+  viewResetToken?: number;
 }
 
 interface CanvasSize {
@@ -391,7 +392,7 @@ function drawVerticals(
   context.restore();
 }
 
-export function GraphCanvas({ expressions, overlay, defaultView }: GraphCanvasProps) {
+export function GraphCanvas({ expressions, overlay, defaultView, viewResetToken = 0 }: GraphCanvasProps) {
   const wrapperRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [size, setSize] = useState<CanvasSize>({ width: 900, height: 520 });
@@ -400,6 +401,10 @@ export function GraphCanvas({ expressions, overlay, defaultView }: GraphCanvasPr
   const dragRef = useRef<{ pointerId: number; startX: number; startY: number; startView: ViewBox } | null>(null);
 
   const normalizedDefaultView = useMemo(() => clampView(defaultView), [defaultView]);
+
+  useEffect(() => {
+    setView(normalizedDefaultView);
+  }, [viewResetToken]);
 
   useEffect(() => {
     const element = wrapperRef.current;

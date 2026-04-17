@@ -2,7 +2,16 @@ import { X_LIMITS } from "../constants";
 import { asFinite, clamp } from "../math/numeric";
 import type { CompiledExpression, SampleMode, ToolMode, ToolState } from "../types";
 
-const TOOL_MODES: ToolMode[] = ["none", "under", "between", "riemann", "trap", "volume"];
+const TOOL_MODES: ToolMode[] = [
+  "none",
+  "under",
+  "between",
+  "riemann",
+  "trap",
+  "volume",
+  "newtonLeibniz",
+  "averageValue",
+];
 const SAMPLE_MODES: SampleMode[] = ["left", "mid", "right"];
 
 function normalizeBound(value: unknown, fallback: number): number {
@@ -41,6 +50,19 @@ export function normalizeTool(rawTool: Partial<ToolState>, validExpressions: Com
 
   let exprA = pickExpression(rawTool.exprA, availableIds, fallbackA);
   let exprB = pickExpression(rawTool.exprB, availableIds, fallbackB);
+
+  if (
+    mode === "under" ||
+    mode === "riemann" ||
+    mode === "trap" ||
+    mode === "volume" ||
+    mode === "newtonLeibniz" ||
+    mode === "averageValue"
+  ) {
+    if (!exprA) {
+      exprA = fallbackA;
+    }
+  }
 
   if (mode === "between") {
     if (!exprA) {

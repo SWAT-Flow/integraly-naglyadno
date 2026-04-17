@@ -45,9 +45,10 @@ function ExpressionRowComponent({
   const editRowLabel = "\u0420\u0435\u0434\u0430\u043a\u0442\u0438\u0440\u043e\u0432\u0430\u0442\u044c \u0432\u044b\u0440\u0430\u0436\u0435\u043d\u0438\u0435";
   const deleteLabel = "\u0423\u0434\u0430\u043b\u0438\u0442\u044c \u0432\u044b\u0440\u0430\u0436\u0435\u043d\u0438\u0435";
   const previewPrefix = expression.orientation === "xOfY" ? "x = " : "y = ";
+  const previewSource = expression.normalized || expression.text;
   const previewTex = expression.normalized ? `${previewPrefix}${expressionToTex(expression.normalized)}` : null;
   const displayText = expression.text.trim()
-    ? `${previewPrefix}${formatExpressionText(expression.normalized || expression.text)}`
+    ? `${previewPrefix}${formatExpressionText(previewSource)}`
     : `${previewPrefix}\u2026`;
 
   return (
@@ -72,7 +73,7 @@ function ExpressionRowComponent({
                 onActivate();
                 setIsEditing(true);
               }}
-              placeholder="y = sin(x)"
+              placeholder="Например: y = sin(x)"
               spellCheck={false}
               type="text"
               value={expression.text}
@@ -102,7 +103,7 @@ function ExpressionRowComponent({
           title={visibilityLabel}
           type="button"
         >
-          {expression.visible ? "On" : "Off"}
+          {expression.visible ? "Вкл" : "Выкл"}
         </button>
         <button
           aria-label={deleteLabel}

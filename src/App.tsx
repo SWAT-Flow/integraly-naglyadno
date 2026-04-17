@@ -1,15 +1,20 @@
 import { startTransition, useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
 import { DEFAULT_VIEW, PALETTE } from "./constants";
 import { ExpressionList } from "./components/ExpressionList";
+import { LearningHub } from "./components/LearningHub";
 import { TemplateKeyboard, type TemplateInsert } from "./components/TemplateKeyboard";
 import { ToolPanel } from "./components/ToolPanel";
+import { Button } from "./components/ui";
 import { runSelfTests } from "./dev/selfTests";
 import { estimateDefaultView } from "./graph/estimateDefaultView";
 import { GraphCanvas } from "./graph/GraphCanvas";
+import { LEARNING_MODULES } from "./learning/modules";
+import type { LearningPreset } from "./learning/types";
+import { clampView } from "./math/numeric";
 import { compileExpression, evaluateCompiled } from "./math/parser";
 import { buildOverlay } from "./tools/buildOverlay";
 import { normalizeTool } from "./tools/normalizeTool";
-import type { CompiledExpression, ExpressionDraft, ExpressionViewModel, ToolState } from "./types";
+import type { CompiledExpression, ExpressionDraft, ExpressionViewModel, ToolState, ViewBox } from "./types";
 
 const createId = () => Math.random().toString(36).slice(2, 10);
 
@@ -79,6 +84,8 @@ function patchNeedsNormalization(source: ToolState, next: ToolState): boolean {
 }
 
 export default function App() {
+  const [appMode, setAppMode] = useState<"calculator" | "modules">("calculator");
+  const [activeModuleId, setActiveModuleId] = useState<string>(LEARNING_MODULES[0]?.id ?? "");
   const [expressions, setExpressions] = useState<ExpressionDraft[]>([
     createExpression("sin(x)", 0),
     createExpression("x^2 / 6", 1),
@@ -96,6 +103,8 @@ export default function App() {
   });
   const inputRefs = useRef<Record<string, HTMLInputElement | null>>({});
   const pendingInsertRef = useRef<{ targetId: string; template: TemplateInsert } | null>(null);
+  const [viewOverride, setViewOverride] = useState<ViewBox | null>(null);
+  const [graphResetToken, setGraphResetToken] = useState(0);
 
   const expressionState = useMemo(() => buildExpressionModels(expressions), [expressions]);
   const deferredCompiled = useDeferredValue(expressionState.compiled);
@@ -124,7 +133,12 @@ export default function App() {
     () => estimateDefaultView(visibleExpressions.length ? visibleExpressions : validExpressions, normalizedTool),
     [normalizedTool, validExpressions, visibleExpressions],
   );
+  const graphDefaultView = viewOverride ?? defaultView ?? DEFAULT_VIEW;
   const selfTests = useMemo(() => runSelfTests(), []);
+
+  const clearViewOverride = () => {
+    setViewOverride(null);
+  };
 
   useEffect(() => {
     if (!patchNeedsNormalization(tool, normalizedTool)) {
@@ -158,6 +172,8 @@ export default function App() {
     if (!input) {
       return false;
     }
+
+    clearViewOverride();
 
     input.focus();
     const start = input.selectionStart ?? input.value.length;
@@ -244,77 +260,133 @@ export default function App() {
     pendingInsertRef.current = { targetId, template };
   };
 
+  const applyLearningPreset = (preset: LearningPreset) => {
+    startTransition(() => {
+      const nextExpressions = preset.expressions.map((expression, index) => ({
+        id: createId(),
+        text: expression.text,
+        visible: expression.visible ?? true,
+        color: expression.color ?? nextColor(index),
+      }));
+      const primaryId = nextExpressions[0]?.id ?? null;
+      const secondaryId = nextExpressions[1]?.id ?? primaryId;
+
+      pendingInsertRef.current = null;
+      inputRefs.current = {};
+      setEditorRequest(0);
+      setExpressions(nextExpressions);
+      setActiveId(primaryId);
+      setTool({
+        mode: preset.tool.mode ?? "none",
+        exprA: primaryId,
+        exprB: secondaryId,
+        a: preset.tool.a ?? -2,
+        b: preset.tool.b ?? 2,
+        n: preset.tool.n ?? 8,
+        sample: preset.tool.sample ?? "mid",
+      });
+      setViewOverride(preset.view ? clampView(preset.view) : null);
+      setGraphResetToken((current) => current + 1);
+      setAppMode("calculator");
+    });
+  };
+
   return (
-    <div className="app-shell">
-      <main className="app-grid">
-        <aside className="left-column">
-          <ExpressionList
-            activeId={activeId}
-            editorRequest={editorRequest}
-            expressions={expressionState.rows}
-            inputRefs={inputRefs}
-            onActivate={(id) => {
-              setActiveId(id);
-              setEditorRequest((current) => current + 1);
-            }}
-            onAdd={() => {
-              startTransition(() => {
-                const created = createExpression("", expressions.length);
-                setExpressions((current) => [...current, created]);
-                setActiveId(created.id);
+    <div className={`app-shell app-shell-${appMode}`}>
+      <div className="app-mode-bar">
+        <Button active={appMode === "calculator"} onClick={() => setAppMode("calculator")}>
+          Калькулятор
+        </Button>
+        <Button active={appMode === "modules"} onClick={() => setAppMode("modules")}>
+          Учебные модули
+        </Button>
+      </div>
+
+      {appMode === "calculator" ? (
+        <main className="app-grid">
+          <aside className="left-column">
+            <ExpressionList
+              activeId={activeId}
+              editorRequest={editorRequest}
+              expressions={expressionState.rows}
+              inputRefs={inputRefs}
+              onActivate={(id) => {
+                setActiveId(id);
                 setEditorRequest((current) => current + 1);
-              });
-            }}
-            onChange={(id, value) => {
-              setExpressions((current) =>
-                current.map((expression) => (expression.id === id ? { ...expression, text: value } : expression)),
-              );
-            }}
-            onDelete={(id) => {
-              startTransition(() => {
-                setExpressions((current) => {
-                  const next = current.filter((expression) => expression.id !== id);
-                  if (activeId === id) {
-                    setActiveId(next[0]?.id ?? null);
-                  }
-                  return next;
+              }}
+              onAdd={() => {
+                startTransition(() => {
+                  clearViewOverride();
+                  const created = createExpression("", expressions.length);
+                  setExpressions((current) => [...current, created]);
+                  setActiveId(created.id);
+                  setEditorRequest((current) => current + 1);
                 });
+              }}
+              onChange={(id, value) => {
+                clearViewOverride();
+                setExpressions((current) =>
+                  current.map((expression) => (expression.id === id ? { ...expression, text: value } : expression)),
+                );
+              }}
+              onDelete={(id) => {
+                startTransition(() => {
+                  clearViewOverride();
+                  setExpressions((current) => {
+                    const next = current.filter((expression) => expression.id !== id);
+                    if (activeId === id) {
+                      setActiveId(next[0]?.id ?? null);
+                    }
+                    return next;
+                  });
 
-                if (pendingInsertRef.current?.targetId === id) {
-                  pendingInsertRef.current = null;
-                }
+                  if (pendingInsertRef.current?.targetId === id) {
+                    pendingInsertRef.current = null;
+                  }
 
-                delete inputRefs.current[id];
-              });
-            }}
-            onToggleVisible={(id) => {
-              setExpressions((current) =>
-                current.map((expression) =>
-                  expression.id === id ? { ...expression, visible: !expression.visible } : expression,
-                ),
-              );
-            }}
-          />
-          <TemplateKeyboard onInsert={insertTemplate} />
-        </aside>
+                  delete inputRefs.current[id];
+                });
+              }}
+              onToggleVisible={(id) => {
+                clearViewOverride();
+                setExpressions((current) =>
+                  current.map((expression) =>
+                    expression.id === id ? { ...expression, visible: !expression.visible } : expression,
+                  ),
+                );
+              }}
+            />
+            <TemplateKeyboard onInsert={insertTemplate} />
+          </aside>
 
-        <section className="center-column">
-          <GraphCanvas
-            defaultView={defaultView ?? DEFAULT_VIEW}
-            expressions={visibleExpressions}
-            overlay={overlay}
-          />
-        </section>
+          <section className="center-column">
+            <GraphCanvas
+              defaultView={graphDefaultView}
+              expressions={visibleExpressions}
+              overlay={overlay}
+              viewResetToken={graphResetToken}
+            />
+          </section>
 
-        <aside className="right-column">
-          <ToolPanel
-            onChange={(patch) => setTool((current) => ({ ...current, ...patch }))}
-            overlay={overlay}
-            tool={normalizedTool}
-            validExpressions={calculableExpressions}
-          />
-        </aside>
-      </main>
+          <aside className="right-column">
+            <ToolPanel
+              onChange={(patch) => {
+                clearViewOverride();
+                setTool((current) => ({ ...current, ...patch }));
+              }}
+              overlay={overlay}
+              tool={normalizedTool}
+              validExpressions={calculableExpressions}
+            />
+          </aside>
+        </main>
+      ) : (
+        <LearningHub
+          activeModuleId={activeModuleId}
+          onOpenPreset={applyLearningPreset}
+          onSelectModule={setActiveModuleId}
+        />
+      )}
     </div>
   );
 }

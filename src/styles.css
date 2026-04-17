@@ -42,6 +42,16 @@ button {
   padding: 12px;
 }
 
+.app-mode-bar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.app-mode-bar .button {
+  min-width: 170px;
+}
+
 .hero-card,
 .card,
 .graph-card {
@@ -601,11 +611,333 @@ button {
   overflow-x: auto;
 }
 
+.formula-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
 .formula-inline {
   border-radius: 0;
   background: transparent;
   padding: 0;
   overflow: visible;
+}
+
+.formula-inline-text {
+  display: inline-flex;
+  vertical-align: middle;
+}
+
+.formula-inline-text .katex {
+  font-size: 1em;
+}
+
+.explanation-block {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.explanation-block p {
+  margin: 0;
+  color: #475569;
+  line-height: 1.7;
+}
+
+.app-shell-modules .modules-layout {
+  display: grid;
+  flex: 1;
+  height: 100%;
+  min-height: 0;
+  gap: 20px;
+  grid-template-columns: minmax(280px, 340px) minmax(0, 1fr);
+  align-items: stretch;
+  overflow: hidden;
+}
+
+.app-shell-modules .modules-nav-column,
+.app-shell-modules .modules-content-column {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+}
+
+.app-shell-modules .modules-nav-column .card,
+.app-shell-modules .modules-content-column .card {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.app-shell-modules .modules-nav-column .card-body,
+.app-shell-modules .modules-content-column .card-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.learning-module-list,
+.learning-article {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  flex: 1 1 auto;
+  overflow-x: hidden;
+  overflow-y: scroll;
+  scrollbar-gutter: stable;
+  scrollbar-width: thin;
+  scrollbar-color: #cbd5e1 #f8fafc;
+}
+
+.learning-module-list::-webkit-scrollbar,
+.learning-article::-webkit-scrollbar {
+  width: 10px;
+}
+
+.learning-module-list::-webkit-scrollbar-track,
+.learning-article::-webkit-scrollbar-track {
+  background: #f8fafc;
+  border-radius: 999px;
+}
+
+.learning-module-list::-webkit-scrollbar-thumb,
+.learning-article::-webkit-scrollbar-thumb {
+  background: #cbd5e1;
+  border: 2px solid #f8fafc;
+  border-radius: 999px;
+}
+
+.learning-module-list::-webkit-scrollbar-thumb:hover,
+.learning-article::-webkit-scrollbar-thumb:hover {
+  background: #94a3b8;
+}
+
+.learning-module-list {
+  gap: 10px;
+  padding-right: 8px;
+}
+
+.learning-module-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  width: 100%;
+  border: 1px solid #d9e2ec;
+  border-radius: 18px;
+  background: #fbfdff;
+  padding: 14px;
+  text-align: left;
+}
+
+.learning-module-item:hover {
+  background: #f8fafc;
+}
+
+.learning-module-item-active {
+  border-color: #93c5fd;
+  box-shadow: inset 0 0 0 1px #bfdbfe;
+}
+
+.learning-module-order {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 30px;
+  height: 30px;
+  border-radius: 999px;
+  background: #eff6ff;
+  color: #1d4ed8;
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.learning-module-copy {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+}
+
+.learning-module-copy strong {
+  font-size: 15px;
+}
+
+.learning-module-copy span {
+  color: #64748b;
+  font-size: 13px;
+  line-height: 1.55;
+}
+
+.learning-article {
+  gap: 18px;
+  padding-right: 8px;
+}
+
+.learning-summary {
+  border-radius: 18px;
+  background: #f8fafc;
+  padding: 16px;
+}
+
+.learning-summary strong {
+  display: block;
+  margin-bottom: 6px;
+}
+
+.learning-summary p {
+  margin: 0;
+  color: #475569;
+  line-height: 1.7;
+}
+
+.learning-preset-bar,
+.learning-preset-list,
+.practice-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.learning-preset-button {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  width: 100%;
+  border: 1px solid #d9e2ec;
+  border-radius: 18px;
+  background: linear-gradient(180deg, #ffffff 0%, #f8fbff 100%);
+  padding: 14px 16px;
+  text-align: left;
+}
+
+.learning-preset-button:hover {
+  background: #f8fafc;
+}
+
+.learning-preset-button strong {
+  font-size: 14px;
+}
+
+.learning-preset-button span {
+  color: #64748b;
+  font-size: 13px;
+  line-height: 1.55;
+}
+
+.learning-section-title,
+.learning-block-title {
+  margin: 0;
+  color: #0f172a;
+}
+
+.learning-section-title {
+  font-size: 18px;
+}
+
+.learning-block-title {
+  font-size: 14px;
+  font-weight: 700;
+}
+
+.learning-paragraph,
+.learning-note {
+  margin: 0;
+  color: #334155;
+  line-height: 1.75;
+}
+
+.learning-formula-block,
+.learning-list-block {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.learning-formula-card {
+  margin: 0;
+}
+
+.learning-inline-formula {
+  margin: 0 0.18em;
+}
+
+.learning-fallback-formula {
+  border-radius: 16px;
+  background: #f8fafc;
+  padding: 14px;
+  color: #0f172a;
+  font-family: "Segoe UI", sans-serif;
+  line-height: 1.6;
+}
+
+.learning-list {
+  margin: 0;
+  padding-left: 20px;
+  color: #334155;
+  line-height: 1.7;
+}
+
+.learning-list li + li {
+  margin-top: 8px;
+}
+
+.learning-callout {
+  border-radius: 18px;
+  padding: 16px;
+}
+
+.learning-callout p {
+  margin: 0;
+  color: #334155;
+  line-height: 1.7;
+}
+
+.learning-callout-blue {
+  background: #eff6ff;
+}
+
+.learning-callout-emerald {
+  background: #ecfdf5;
+}
+
+.learning-callout-amber {
+  background: #fffbeb;
+}
+
+.learning-callout-rose {
+  background: #fff1f2;
+}
+
+.learning-callout-violet {
+  background: #f5f3ff;
+}
+
+.learning-callout-slate {
+  background: #f8fafc;
+}
+
+.learning-practice-grid {
+  display: grid;
+  gap: 14px;
+}
+
+.practice-prompt,
+.practice-answer,
+.practice-solution {
+  color: #334155;
+  line-height: 1.75;
+}
+
+.practice-answer {
+  font-weight: 600;
+}
+
+.practice-solution {
+  color: #475569;
 }
 
 .expression-preview {
@@ -635,6 +967,10 @@ button {
   .right-column {
     grid-column: 1 / -1;
   }
+
+  .app-shell-modules .modules-layout {
+    grid-template-columns: 300px minmax(0, 1fr);
+  }
 }
 
 @media (max-width: 900px) {
@@ -651,7 +987,31 @@ button {
     grid-template-columns: 1fr;
   }
 
+  .app-shell-modules .modules-layout {
+    grid-template-columns: 1fr;
+    overflow: visible;
+  }
+
   .graph-shell {
     min-height: 360px;
+  }
+
+  .app-shell-modules .modules-nav-column .card,
+  .app-shell-modules .modules-content-column .card,
+  .app-shell-modules .modules-nav-column .card-body,
+  .app-shell-modules .modules-content-column .card-body {
+    overflow: visible;
+  }
+
+  .learning-module-list,
+  .learning-article {
+    overflow: visible;
+    scrollbar-gutter: auto;
+  }
+
+  .learning-preset-bar .button,
+  .practice-actions .button,
+  .app-mode-bar .button {
+    flex: 1 1 100%;
   }
 }

@@ -1,4 +1,4 @@
-import { COLORS } from "../constants";
+﻿import { COLORS } from "../constants";
 import { buildIntervals, findRoots, midpointIntegral, sortAB, uniqueSorted } from "../math/numeric";
 import { expressionToTex, formatExpressionText } from "../math/parser";
 import type {
@@ -31,6 +31,8 @@ function emptyOverlay(message: string, metrics: OverlayMetric[] = []): OverlayDa
     verticals: [],
     metrics: metrics.length ? metrics : [{ label: "\u0421\u0442\u0430\u0442\u0443\u0441", value: message, tone: "slate" }],
     formulaTex: null,
+    formulaSteps: [],
+    explanation: [],
     volumePreview: null,
   };
 }
@@ -197,6 +199,77 @@ function buildBetweenFormulaTex(segments: BetweenSegment[]): string | null {
     .join(" + ");
 }
 
+function buildBetweenFormulaSteps(segments: BetweenSegment[], area: number, signedDifference: number): string[] {
+  if (!segments.length) {
+    return [];
+  }
+
+  const steps = segments.map((segment, index) => {
+    const left = formatNumber(segment.left, 3);
+    const right = formatNumber(segment.right, 3);
+    const topTex = expressionToTex(segment.topExpression.normalized);
+    const bottomTex = expressionToTex(segment.bottomExpression.normalized);
+    return `S_${index + 1} = \\int_{${left}}^{${right}} \\left(${topTex} - ${bottomTex}\\right)\\,dx`;
+  });
+
+  steps.push(`S = ${formatNumber(area)}`);
+  if (Number.isFinite(signedDifference)) {
+    steps.push(`\\int_a^b \\bigl(f(x)-g(x)\\bigr)\\,dx = ${formatNumber(signedDifference)}`);
+  }
+  return steps;
+}
+
+interface UnderOverlaySnapshot {
+  regions: GraphRegion[];
+  roots: number[];
+  breaks: number[];
+  signedIntegral: number;
+  geometricArea: number;
+  points: GraphPoint[];
+}
+
+function buildUnderSnapshot(fn: (x: number) => number, a: number, b: number): UnderOverlaySnapshot {
+  const roots = findRoots(fn, a, b);
+  const breaks = findDiscontinuityBreaks(fn, a, b);
+  const intervals = buildIntervals(a, b, uniqueSorted([...roots, ...breaks]));
+  const regions: GraphRegion[] = [];
+
+  for (const [left, right] of intervals) {
+    const midpoint = (left + right) / 2;
+    const sample = fn(midpoint);
+    if (!Number.isFinite(sample)) {
+      continue;
+    }
+
+    const positive = sample >= 0;
+    regions.push({
+      x1: left,
+      x2: right,
+      topFn: positive ? fn : () => 0,
+      bottomFn: positive ? () => 0 : fn,
+      fill: positive ? COLORS.blue : COLORS.rose,
+      opacity: 0.2,
+      stroke: positive ? COLORS.blue : COLORS.rose,
+      strokeWidth: 1,
+    });
+  }
+
+  const signedIntegral = midpointIntegral(fn, a, b);
+  const geometricArea = midpointIntegral((x) => Math.abs(fn(x)), a, b);
+  const points = roots
+    .map((x) => ({ x, y: 0, color: COLORS.violet, label: `x=${formatNumber(x, 3)}` }))
+    .filter((point) => point.x >= a && point.x <= b);
+
+  return {
+    regions,
+    roots,
+    breaks,
+    signedIntegral,
+    geometricArea,
+    points,
+  };
+}
+
 export function buildOverlay(
   rawTool: Partial<ToolState>,
   validExpressions: CompiledExpression[],
@@ -232,63 +305,43 @@ export function buildOverlay(
       if (!fnA) {
         return emptyOverlay("\u0412\u044b\u0431\u0435\u0440\u0438\u0442\u0435 \u043a\u043e\u0440\u0440\u0435\u043a\u0442\u043d\u0443\u044e \u0444\u0443\u043d\u043a\u0446\u0438\u044e \u0434\u043b\u044f \u043f\u043b\u043e\u0449\u0430\u0434\u0438 \u043f\u043e\u0434 \u0433\u0440\u0430\u0444\u0438\u043a\u043e\u043c.");
       }
-
-      const roots = findRoots(fnA, a, b);
-      const breaks = findDiscontinuityBreaks(fnA, a, b);
-      const intervals = buildIntervals(a, b, uniqueSorted([...roots, ...breaks]));
-      const regions: GraphRegion[] = [];
-
-      for (const [left, right] of intervals) {
-        const midpoint = (left + right) / 2;
-        const sample = fnA(midpoint);
-        if (!Number.isFinite(sample)) {
-          continue;
-        }
-
-        const positive = sample >= 0;
-        regions.push({
-          x1: left,
-          x2: right,
-          topFn: positive ? fnA : () => 0,
-          bottomFn: positive ? () => 0 : fnA,
-          fill: positive ? COLORS.blue : COLORS.rose,
-          opacity: 0.2,
-          stroke: positive ? COLORS.blue : COLORS.rose,
-          strokeWidth: 1,
-        });
-      }
-
-      const signedIntegral = midpointIntegral(fnA, a, b);
-      const geometricArea = midpointIntegral((x) => Math.abs(fnA(x)), a, b);
-      const points = roots
-        .map((x) => ({ x, y: 0, color: COLORS.violet, label: `x=${formatNumber(x, 3)}` }))
-        .filter((point) => point.x >= a && point.x <= b);
+      const snapshot = buildUnderSnapshot(fnA, a, b);
+      const texA = expressionA ? expressionToTex(expressionA.normalized) : "f(x)";
+      const hasFiniteValues = Number.isFinite(snapshot.signedIntegral) || Number.isFinite(snapshot.geometricArea);
 
       return {
-        regions,
+        regions: snapshot.regions,
         polygons: [],
         polylines: [],
-        points,
+        points: snapshot.points,
         verticals: buildVerticals(a, b),
         metrics: withOptionalStatus(
           [
-            { label: "\u0418\u043d\u0442\u0435\u0440\u0432\u0430\u043b", value: `[${formatNumber(a, 3)}; ${formatNumber(b, 3)}]`, tone: "slate" },
             {
               label: "\u041f\u043e\u0434\u043f\u0438\u0441\u0430\u043d\u043d\u044b\u0439 \u0438\u043d\u0442\u0435\u0433\u0440\u0430\u043b",
-              value: formatNumber(signedIntegral),
+              value: formatNumber(snapshot.signedIntegral),
               tone: "blue",
             },
             {
               label: "\u0413\u0435\u043e\u043c\u0435\u0442\u0440\u0438\u0447\u0435\u0441\u043a\u0430\u044f \u043f\u043b\u043e\u0449\u0430\u0434\u044c",
-              value: formatNumber(geometricArea),
+              value: formatNumber(snapshot.geometricArea),
               tone: "emerald",
             },
-            { label: "\u041a\u043e\u0440\u043d\u0438", value: String(points.length), tone: "violet" },
+            { label: "\u0418\u043d\u0442\u0435\u0440\u0432\u0430\u043b", value: `[${formatNumber(a, 3)}; ${formatNumber(b, 3)}]`, tone: "slate" },
+            { label: "\u041a\u043e\u0440\u043d\u0438", value: String(snapshot.points.length), tone: "violet" },
           ],
           "\u041d\u0430 \u0432\u044b\u0431\u0440\u0430\u043d\u043d\u043e\u043c \u0438\u043d\u0442\u0435\u0440\u0432\u0430\u043b\u0435 \u043d\u0435\u0442 \u043a\u043e\u043d\u0435\u0447\u043d\u044b\u0445 \u0437\u043d\u0430\u0447\u0435\u043d\u0438\u0439.",
-          !regions.length && !Number.isFinite(signedIntegral) && !Number.isFinite(geometricArea),
+          !snapshot.regions.length && !hasFiniteValues,
         ),
         formulaTex: "\\int_a^b f(x)\\,dx\\quad\\text{\u0438}\\quad\\int_a^b |f(x)|\\,dx",
+        formulaSteps: [
+          `\\int_{${formatNumber(a, 3)}}^{${formatNumber(b, 3)}} ${texA}\\,dx = ${formatNumber(snapshot.signedIntegral)}`,
+          `S_{\\text{geom}} = \\int_{${formatNumber(a, 3)}}^{${formatNumber(b, 3)}} \\left|${texA}\\right|\\,dx = ${formatNumber(snapshot.geometricArea)}`,
+        ],
+        explanation: [
+          "\u041f\u043e\u0434\u043f\u0438\u0441\u0430\u043d\u043d\u044b\u0439 \u0438\u043d\u0442\u0435\u0433\u0440\u0430\u043b \u0443\u0447\u0438\u0442\u044b\u0432\u0430\u0435\u0442, \u043b\u0435\u0436\u0438\u0442 \u043b\u0438 \u0433\u0440\u0430\u0444\u0438\u043a \u0432\u044b\u0448\u0435 \u0438\u043b\u0438 \u043d\u0438\u0436\u0435 \u043e\u0441\u0438 Ox.",
+          "\u0413\u0435\u043e\u043c\u0435\u0442\u0440\u0438\u0447\u0435\u0441\u043a\u0430\u044f \u043f\u043b\u043e\u0449\u0430\u0434\u044c \u0441\u0447\u0438\u0442\u0430\u0435\u0442 \u0432\u0441\u0435 \u0443\u0447\u0430\u0441\u0442\u043a\u0438 \u043a\u0430\u043a \u043f\u043e\u043b\u043e\u0436\u0438\u0442\u0435\u043b\u044c\u043d\u044b\u0435 \u043f\u043b\u043e\u0449\u0430\u0434\u0438.",
+        ],
         volumePreview: null,
       };
     }
@@ -379,13 +432,13 @@ export function buildOverlay(
         verticals: buildVerticals(a, b),
         metrics: withOptionalStatus(
           [
-            { label: "\u0418\u043d\u0442\u0435\u0440\u0432\u0430\u043b", value: `[${formatNumber(a, 3)}; ${formatNumber(b, 3)}]`, tone: "slate" },
             { label: "\u041f\u043b\u043e\u0449\u0430\u0434\u044c", value: formatNumber(area), tone: "emerald" },
             {
               label: "\u041f\u043e\u0434\u043f\u0438\u0441\u0430\u043d\u043d\u0430\u044f \u0440\u0430\u0437\u043d\u043e\u0441\u0442\u044c",
               value: formatNumber(signedDifference),
               tone: "blue",
             },
+            { label: "\u0418\u043d\u0442\u0435\u0440\u0432\u0430\u043b", value: `[${formatNumber(a, 3)}; ${formatNumber(b, 3)}]`, tone: "slate" },
             { label: "\u041f\u0435\u0440\u0435\u0441\u0435\u0447\u0435\u043d\u0438\u044f", value: String(intersections.length), tone: "violet" },
             ...orderingMetrics,
           ],
@@ -393,6 +446,11 @@ export function buildOverlay(
           !regions.length && !Number.isFinite(area),
         ),
         formulaTex: buildBetweenFormulaTex(mergedSegments),
+        formulaSteps: buildBetweenFormulaSteps(mergedSegments, area, signedDifference),
+        explanation: [
+          "\u041d\u0430 \u043a\u0430\u0436\u0434\u043e\u043c \u0443\u0447\u0430\u0441\u0442\u043a\u0435 \u043f\u043b\u043e\u0449\u0430\u0434\u044c \u0441\u0447\u0438\u0442\u0430\u0435\u0442\u0441\u044f \u043a\u0430\u043a \u201c\u0432\u0435\u0440\u0445\u043d\u044f\u044f \u0444\u0443\u043d\u043a\u0446\u0438\u044f \u043c\u0438\u043d\u0443\u0441 \u043d\u0438\u0436\u043d\u044f\u044f\u201d.",
+          "\u0415\u0441\u043b\u0438 \u0433\u0440\u0430\u0444\u0438\u043a\u0438 \u043c\u0435\u043d\u044f\u044e\u0442\u0441\u044f \u043c\u0435\u0441\u0442\u0430\u043c\u0438, \u0438\u043d\u0442\u0435\u0440\u0432\u0430\u043b \u043d\u0443\u0436\u043d\u043e \u0434\u0435\u043b\u0438\u0442\u044c \u043f\u043e \u0442\u043e\u0447\u043a\u0430\u043c \u043f\u0435\u0440\u0435\u0441\u0435\u0447\u0435\u043d\u0438\u044f.",
+        ],
         volumePreview: null,
       };
     }
@@ -438,17 +496,26 @@ export function buildOverlay(
         verticals: buildVerticals(a, b),
         metrics: withOptionalStatus(
           [
-            { label: "n", value: String(tool.n), tone: "slate" },
-            { label: "\u0412\u044b\u0431\u043e\u0440\u043a\u0430", value: tool.sample, tone: "violet" },
             { label: "\u0421\u0443\u043c\u043c\u0430 \u0420\u0438\u043c\u0430\u043d\u0430", value: formatNumber(approx), tone: "blue" },
             { label: "\u0418\u043d\u0442\u0435\u0433\u0440\u0430\u043b", value: formatNumber(exact), tone: "emerald" },
             { label: "\u0410\u0431\u0441. \u043e\u0448\u0438\u0431\u043a\u0430", value: formatNumber(Math.abs(approx - exact)), tone: "rose" },
+            { label: "n", value: String(tool.n), tone: "slate" },
+            { label: "\u0412\u044b\u0431\u043e\u0440\u043a\u0430", value: tool.sample, tone: "violet" },
             { label: "\u041f\u0440\u044f\u043c\u043e\u0443\u0433\u043e\u043b\u044c\u043d\u0438\u043a\u043e\u0432", value: String(used), tone: "amber" },
           ],
           "\u041d\u0430 \u0432\u044b\u0431\u0440\u0430\u043d\u043d\u043e\u043c \u0440\u0430\u0437\u0431\u0438\u0435\u043d\u0438\u0438 \u043d\u0435\u0442 \u043a\u043e\u043d\u0435\u0447\u043d\u044b\u0445 \u0437\u043d\u0430\u0447\u0435\u043d\u0438\u0439.",
           used === 0,
         ),
         formulaTex: "S_n = \\sum_{i=1}^{n} f(\\xi_i)\\,\\Delta x",
+        formulaSteps: [
+          "S_n = \\sum_{i=1}^{n} f(\\xi_i)\\,\\Delta x",
+          `S_n \\approx ${formatNumber(approx)}`,
+          `\\left|S_n - I\\right| = ${formatNumber(Math.abs(approx - exact))}`,
+        ],
+        explanation: [
+          "\u0421\u0443\u043c\u043c\u0430 \u0420\u0438\u043c\u0430\u043d\u0430 \u0434\u0430\u0451\u0442 \u043f\u0440\u0438\u0431\u043b\u0438\u0436\u0435\u043d\u0438\u0435 \u0438\u043d\u0442\u0435\u0433\u0440\u0430\u043b\u0430 \u0447\u0435\u0440\u0435\u0437 \u043f\u0440\u044f\u043c\u043e\u0443\u0433\u043e\u043b\u044c\u043d\u0438\u043a\u0438.",
+          "\u041f\u0440\u0438 \u0440\u043e\u0441\u0442\u0435 n \u044d\u0442\u043e \u043f\u0440\u0438\u0431\u043b\u0438\u0436\u0435\u043d\u0438\u0435 \u043e\u0431\u044b\u0447\u043d\u043e \u0441\u0442\u0430\u043d\u043e\u0432\u0438\u0442\u0441\u044f \u0442\u043e\u0447\u043d\u0435\u0435.",
+        ],
         volumePreview: null,
       };
     }
@@ -503,11 +570,11 @@ export function buildOverlay(
         verticals: buildVerticals(a, b),
         metrics: withOptionalStatus(
           [
-            { label: "n", value: String(tool.n), tone: "slate" },
-            { label: "\u0428\u0430\u0433 h", value: formatNumber(width), tone: "amber" },
             { label: "\u0422\u0440\u0430\u043f\u0435\u0446\u0438\u0438", value: formatNumber(approx), tone: "blue" },
             { label: "\u0418\u043d\u0442\u0435\u0433\u0440\u0430\u043b", value: formatNumber(exact), tone: "emerald" },
             { label: "\u0410\u0431\u0441. \u043e\u0448\u0438\u0431\u043a\u0430", value: formatNumber(Math.abs(approx - exact)), tone: "rose" },
+            { label: "n", value: String(tool.n), tone: "slate" },
+            { label: "\u0428\u0430\u0433 h", value: formatNumber(width), tone: "amber" },
             { label: "\u0422\u0440\u0430\u043f\u0435\u0446\u0438\u0439", value: String(used), tone: "violet" },
           ],
           "\u041d\u0430 \u0432\u044b\u0431\u0440\u0430\u043d\u043d\u043e\u043c \u0438\u043d\u0442\u0435\u0440\u0432\u0430\u043b\u0435 \u043d\u0435\u0442 \u043a\u043e\u043d\u0435\u0447\u043d\u044b\u0445 \u0442\u0440\u0430\u043f\u0435\u0446\u0438\u0439.",
@@ -515,6 +582,125 @@ export function buildOverlay(
         ),
         formulaTex:
           "\\int_a^b f(x)\\,dx \\approx \\frac{h}{2}\\bigl(f(x_0)+2\\sum_{i=1}^{n-1}f(x_i)+f(x_n)\\bigr)",
+        formulaSteps: [
+          "\\int_a^b f(x)\\,dx \\approx \\frac{h}{2}\\bigl(f(x_0)+2\\sum_{i=1}^{n-1}f(x_i)+f(x_n)\\bigr)",
+          `T_n \\approx ${formatNumber(approx)}`,
+          `\\left|T_n - I\\right| = ${formatNumber(Math.abs(approx - exact))}`,
+        ],
+        explanation: [
+          "\u041c\u0435\u0442\u043e\u0434 \u0442\u0440\u0430\u043f\u0435\u0446\u0438\u0439 \u0437\u0430\u043c\u0435\u043d\u044f\u0435\u0442 \u0434\u0443\u0433\u0443 \u0433\u0440\u0430\u0444\u0438\u043a\u0430 \u043d\u0430 \u043a\u0430\u0436\u0434\u043e\u043c \u0448\u0430\u0433\u0435 \u043e\u0442\u0440\u0435\u0437\u043a\u043e\u043c.",
+          "\u0427\u0438\u0441\u043b\u0435\u043d\u043d\u043e\u0435 \u043f\u0440\u0438\u0431\u043b\u0438\u0436\u0435\u043d\u0438\u0435 \u0443\u043b\u0443\u0447\u0448\u0430\u0435\u0442\u0441\u044f \u043f\u0440\u0438 \u0443\u043c\u0435\u043d\u044c\u0448\u0435\u043d\u0438\u0438 \u0448\u0430\u0433\u0430 h.",
+        ],
+        volumePreview: null,
+      };
+    }
+
+    if (tool.mode === "newtonLeibniz") {
+      if (!fnA) {
+        return emptyOverlay("\u0412\u044b\u0431\u0435\u0440\u0438\u0442\u0435 \u043a\u043e\u0440\u0440\u0435\u043a\u0442\u043d\u0443\u044e \u0444\u0443\u043d\u043a\u0446\u0438\u044e \u0434\u043b\u044f \u0440\u0435\u0436\u0438\u043c\u0430 \u041d\u044c\u044e\u0442\u043e\u043d\u0430-\u041b\u0435\u0439\u0431\u043d\u0438\u0446\u0430.");
+      }
+
+      const snapshot = buildUnderSnapshot(fnA, a, b);
+      const texA = expressionA ? expressionToTex(expressionA.normalized) : "f(x)";
+
+      return {
+        regions: snapshot.regions,
+        polygons: [],
+        polylines: [],
+        points: snapshot.points,
+        verticals: buildVerticals(a, b),
+        metrics: withOptionalStatus(
+          [
+            { label: "\u0418\u043d\u0442\u0435\u0433\u0440\u0430\u043b", value: formatNumber(snapshot.signedIntegral), tone: "blue" },
+            { label: "\u0418\u043d\u0442\u0435\u0440\u0432\u0430\u043b", value: `[${formatNumber(a, 3)}; ${formatNumber(b, 3)}]`, tone: "slate" },
+            { label: "\u041a\u043e\u0440\u043d\u0438", value: String(snapshot.points.length), tone: "violet" },
+          ],
+          "\u041d\u0430 \u0432\u044b\u0431\u0440\u0430\u043d\u043d\u043e\u043c \u0438\u043d\u0442\u0435\u0440\u0432\u0430\u043b\u0435 \u043d\u0435\u0442 \u043a\u043e\u043d\u0435\u0447\u043d\u044b\u0445 \u0437\u043d\u0430\u0447\u0435\u043d\u0438\u0439.",
+          !snapshot.regions.length && !Number.isFinite(snapshot.signedIntegral),
+        ),
+        formulaTex: `\\int_{${formatNumber(a, 3)}}^{${formatNumber(b, 3)}} ${texA}\\,dx = F(${formatNumber(b, 3)}) - F(${formatNumber(a, 3)})`,
+        formulaSteps: [
+          `\\int_{${formatNumber(a, 3)}}^{${formatNumber(b, 3)}} ${texA}\\,dx = F(${formatNumber(b, 3)}) - F(${formatNumber(a, 3)})`,
+          `\\int_{${formatNumber(a, 3)}}^{${formatNumber(b, 3)}} ${texA}\\,dx \\approx ${formatNumber(snapshot.signedIntegral)}`,
+        ],
+        explanation: [
+          "\u0420\u0435\u0436\u0438\u043c \u043f\u043e\u043a\u0430\u0437\u044b\u0432\u0430\u0435\u0442 \u0438\u0434\u0435\u044e \u0444\u043e\u0440\u043c\u0443\u043b\u044b \u041d\u044c\u044e\u0442\u043e\u043d\u0430-\u041b\u0435\u0439\u0431\u043d\u0438\u0446\u0430: \u0438\u043d\u0442\u0435\u0433\u0440\u0430\u043b \u0440\u0430\u0432\u0435\u043d \u0438\u0437\u043c\u0435\u043d\u0435\u043d\u0438\u044e \u043f\u0435\u0440\u0432\u043e\u043e\u0431\u0440\u0430\u0437\u043d\u043e\u0439 \u043d\u0430 \u043a\u043e\u043d\u0446\u0430\u0445 \u043e\u0442\u0440\u0435\u0437\u043a\u0430.",
+          "\u0421\u0438\u043c\u0432\u043e\u043b\u0438\u0447\u0435\u0441\u043a\u0430\u044f \u043f\u0435\u0440\u0432\u043e\u043e\u0431\u0440\u0430\u0437\u043d\u0430\u044f \u0430\u0432\u0442\u043e\u043c\u0430\u0442\u0438\u0447\u0435\u0441\u043a\u0438 \u043d\u0435 \u0441\u0442\u0440\u043e\u0438\u0442\u0441\u044f: \u0441\u0435\u0439\u0447\u0430\u0441 \u0440\u0435\u0436\u0438\u043c \u0434\u0430\u0451\u0442 \u0432\u0438\u0437\u0443\u0430\u043b\u0438\u0437\u0430\u0446\u0438\u044e \u0438 \u0447\u0438\u0441\u043b\u0435\u043d\u043d\u044b\u0439 \u0438\u0442\u043e\u0433.",
+        ],
+        volumePreview: null,
+      };
+    }
+
+    if (tool.mode === "averageValue") {
+      if (!fnA) {
+        return emptyOverlay("\u0412\u044b\u0431\u0435\u0440\u0438\u0442\u0435 \u043a\u043e\u0440\u0440\u0435\u043a\u0442\u043d\u0443\u044e \u0444\u0443\u043d\u043a\u0446\u0438\u044e \u0434\u043b\u044f \u0440\u0435\u0436\u0438\u043c\u0430 \u0441\u0440\u0435\u0434\u043d\u0435\u0433\u043e \u0437\u043d\u0430\u0447\u0435\u043d\u0438\u044f.");
+      }
+      if (Math.abs(b - a) < 1e-6) {
+        return emptyOverlay("\u0414\u043b\u044f \u0441\u0440\u0435\u0434\u043d\u0435\u0433\u043e \u0437\u043d\u0430\u0447\u0435\u043d\u0438\u044f \u043d\u0443\u0436\u0435\u043d \u043d\u0435\u043d\u0443\u043b\u0435\u0432\u043e\u0439 \u0438\u043d\u0442\u0435\u0440\u0432\u0430\u043b.");
+      }
+
+      const snapshot = buildUnderSnapshot(fnA, a, b);
+      const integral = snapshot.signedIntegral;
+      const averageValue = Number.isFinite(integral) ? integral / (b - a) : Number.NaN;
+      const texA = expressionA ? expressionToTex(expressionA.normalized) : "f(x)";
+      const averageFn = () => averageValue;
+      const averageRegion: GraphRegion[] = Number.isFinite(averageValue)
+        ? [
+            {
+              x1: a,
+              x2: b,
+              topFn: averageValue >= 0 ? averageFn : () => 0,
+              bottomFn: averageValue >= 0 ? () => 0 : averageFn,
+              fill: COLORS.amber,
+              opacity: 0.2,
+              stroke: COLORS.amber,
+              strokeWidth: 1,
+            },
+          ]
+        : [];
+      const polylines: GraphPolyline[] = Number.isFinite(averageValue)
+        ? [
+            {
+              points: [
+                { x: a, y: averageValue },
+                { x: b, y: averageValue },
+              ],
+              stroke: COLORS.amber,
+              strokeWidth: 2.2,
+              dash: [8, 6],
+            },
+          ]
+        : [];
+      const points: GraphPoint[] = Number.isFinite(averageValue)
+        ? [...snapshot.points, { x: b, y: averageValue, label: `f_avg=${formatNumber(averageValue, 3)}`, color: COLORS.amber, radius: 4 }]
+        : snapshot.points;
+
+      return {
+        regions: [...snapshot.regions, ...averageRegion],
+        polygons: [],
+        polylines,
+        points,
+        verticals: buildVerticals(a, b),
+        metrics: withOptionalStatus(
+          [
+            { label: "\u0421\u0440\u0435\u0434\u043d\u0435\u0435 \u0437\u043d\u0430\u0447\u0435\u043d\u0438\u0435", value: formatNumber(averageValue), tone: "amber" },
+            { label: "\u0418\u043d\u0442\u0435\u0433\u0440\u0430\u043b", value: formatNumber(integral), tone: "blue" },
+            { label: "\u0418\u043d\u0442\u0435\u0440\u0432\u0430\u043b", value: `[${formatNumber(a, 3)}; ${formatNumber(b, 3)}]`, tone: "slate" },
+          ],
+          "\u041d\u0435 \u0443\u0434\u0430\u043b\u043e\u0441\u044c \u043a\u043e\u0440\u0440\u0435\u043a\u0442\u043d\u043e \u043e\u0446\u0435\u043d\u0438\u0442\u044c \u0441\u0440\u0435\u0434\u043d\u0435\u0435 \u0437\u043d\u0430\u0447\u0435\u043d\u0438\u0435.",
+          !snapshot.regions.length && !Number.isFinite(averageValue),
+        ),
+        formulaTex: `f_{\\text{avg}} = \\frac{1}{${formatNumber(b - a, 3)}}\\int_{${formatNumber(a, 3)}}^{${formatNumber(b, 3)}} ${texA}\\,dx`,
+        formulaSteps: [
+          `f_{\\text{avg}} = \\frac{1}{${formatNumber(b - a, 3)}}\\int_{${formatNumber(a, 3)}}^{${formatNumber(b, 3)}} ${texA}\\,dx`,
+          `f_{\\text{avg}} = \\frac{${formatNumber(integral)}}{${formatNumber(b - a, 3)}}`,
+          `f_{\\text{avg}} = ${formatNumber(averageValue)}`,
+        ],
+        explanation: [
+          "\u0421\u0440\u0435\u0434\u043d\u0435\u0435 \u0437\u043d\u0430\u0447\u0435\u043d\u0438\u0435 \u0444\u0443\u043d\u043a\u0446\u0438\u0438 \u2014 \u044d\u0442\u043e \u0442\u0430\u043a\u0430\u044f \u0432\u044b\u0441\u043e\u0442\u0430 \u043f\u0440\u044f\u043c\u043e\u0443\u0433\u043e\u043b\u044c\u043d\u0438\u043a\u0430 \u043d\u0430 \u0442\u043e\u043c \u0436\u0435 \u043e\u0441\u043d\u043e\u0432\u0430\u043d\u0438\u0438, \u043f\u0440\u0438 \u043a\u043e\u0442\u043e\u0440\u043e\u0439 \u043f\u043b\u043e\u0449\u0430\u0434\u044c \u0441\u043e\u0432\u043f\u0430\u0434\u0430\u0435\u0442.",
+          "\u0421\u0438\u043d\u044f\u044f/\u0440\u043e\u0437\u043e\u0432\u0430\u044f \u0437\u0430\u043a\u0440\u0430\u0441\u043a\u0430 \u043f\u043e\u043a\u0430\u0437\u044b\u0432\u0430\u0435\u0442 \u043e\u0431\u043b\u0430\u0441\u0442\u044c \u043f\u043e\u0434 \u0433\u0440\u0430\u0444\u0438\u043a\u043e\u043c, \u0430 \u044f\u043d\u0442\u0430\u0440\u043d\u044b\u0439 \u0441\u043b\u043e\u0439 \u2014 \u043f\u0440\u044f\u043c\u043e\u0443\u0433\u043e\u043b\u044c\u043d\u0438\u043a \u0441\u0440\u0435\u0434\u043d\u0435\u0439 \u0432\u044b\u0441\u043e\u0442\u044b.",
+          "\u0412 \u043c\u0435\u0441\u0442\u0430\u0445 \u043d\u0430\u043b\u043e\u0436\u0435\u043d\u0438\u044f \u0441\u043b\u043e\u0451\u0432 \u043f\u043e\u044f\u0432\u043b\u044f\u0435\u0442\u0441\u044f \u0442\u0440\u0435\u0442\u0438\u0439 \u043e\u0442\u0442\u0435\u043d\u043e\u043a, \u043a\u043e\u0442\u043e\u0440\u044b\u0439 \u043d\u0430\u0433\u043b\u044f\u0434\u043d\u043e \u043f\u043e\u043a\u0430\u0437\u044b\u0432\u0430\u0435\u0442 \u0441\u043e\u0432\u043f\u0430\u0434\u0430\u044e\u0449\u0443\u044e \u0447\u0430\u0441\u0442\u044c \u043f\u043b\u043e\u0449\u0430\u0434\u0435\u0439.",
+        ],
         volumePreview: null,
       };
     }
@@ -566,6 +752,10 @@ export function buildOverlay(
             },
           ],
           formulaTex: "V = \\pi \\int_a^b (f(x))^2\\,dx",
+          formulaSteps: ["V = \\pi \\int_a^b (f(x))^2\\,dx"],
+          explanation: [
+            "\u041d\u0430 \u0438\u043d\u0442\u0435\u0440\u0432\u0430\u043b\u0435 \u0435\u0441\u0442\u044c \u0440\u0430\u0437\u0440\u044b\u0432\u044b, \u043f\u043e\u044d\u0442\u043e\u043c\u0443 \u0435\u0434\u0438\u043d\u043e\u0435 \u0442\u0435\u043b\u043e \u0432\u0440\u0430\u0449\u0435\u043d\u0438\u044f \u043d\u0435 \u0441\u0442\u0440\u043e\u0438\u0442\u0441\u044f \u0431\u0435\u0437 \u0434\u043e\u043f\u043e\u043b\u043d\u0438\u0442\u0435\u043b\u044c\u043d\u043e\u0433\u043e \u0440\u0430\u0437\u0431\u0438\u0435\u043d\u0438\u044f.",
+          ],
           volumePreview: null,
         };
       }
@@ -591,14 +781,22 @@ export function buildOverlay(
         verticals: buildVerticals(a, b),
         metrics: withOptionalStatus(
           [
-            { label: "\u0418\u043d\u0442\u0435\u0440\u0432\u0430\u043b", value: `[${formatNumber(a, 3)}; ${formatNumber(b, 3)}]`, tone: "slate" },
             { label: "\u041e\u0431\u044a\u0435\u043c", value: formatNumber(volume), tone: "violet" },
             { label: "\u0420\u0430\u0434\u0438\u0443\u0441 \u0441\u0435\u0447\u0435\u043d\u0438\u044f", value: formatNumber(sampleR), tone: "amber" },
+            { label: "\u0418\u043d\u0442\u0435\u0440\u0432\u0430\u043b", value: `[${formatNumber(a, 3)}; ${formatNumber(b, 3)}]`, tone: "slate" },
           ],
           "\u041d\u0430 \u0432\u044b\u0431\u0440\u0430\u043d\u043d\u043e\u043c \u0438\u043d\u0442\u0435\u0440\u0432\u0430\u043b\u0435 \u043d\u0435\u0442 \u043a\u043e\u043d\u0435\u0447\u043d\u044b\u0445 \u0437\u043d\u0430\u0447\u0435\u043d\u0438\u0439 \u0434\u043b\u044f \u043f\u043e\u0441\u0442\u0440\u043e\u0435\u043d\u0438\u044f \u0442\u0435\u043b\u0430 \u0432\u0440\u0430\u0449\u0435\u043d\u0438\u044f.",
           !Number.isFinite(volume),
         ),
         formulaTex: "V = \\pi \\int_a^b (f(x))^2\\,dx",
+        formulaSteps: [
+          "V = \\pi \\int_a^b (f(x))^2\\,dx",
+          `V \\approx ${formatNumber(volume)}`,
+        ],
+        explanation: [
+          "\u041e\u0431\u044a\u0451\u043c \u0441\u0442\u0440\u043e\u0438\u0442\u0441\u044f \u043a\u0430\u043a \u0441\u0443\u043c\u043c\u0430 \u0442\u043e\u043d\u043a\u0438\u0445 \u043a\u0440\u0443\u0433\u043e\u0432\u044b\u0445 \u0441\u0435\u0447\u0435\u043d\u0438\u0439 \u0440\u0430\u0434\u0438\u0443\u0441\u0430 |f(x)|.",
+          "\u0412 \u043f\u0440\u0435\u0434\u043f\u0440\u043e\u0441\u043c\u043e\u0442\u0440\u0435 \u043f\u043e\u043a\u0430\u0437\u0430\u043d\u043e, \u043a\u0430\u043a \u0432\u044b\u0433\u043b\u044f\u0434\u044f\u0442 \u0442\u0430\u043a\u0438\u0435 \u0441\u0435\u0447\u0435\u043d\u0438\u044f \u043d\u0430 \u0432\u0441\u0451\u043c \u043e\u0442\u0440\u0435\u0437\u043a\u0435.",
+        ],
         volumePreview: {
           a,
           b,
@@ -614,3 +812,4 @@ export function buildOverlay(
     return emptyOverlay("\u041d\u0435 \u0443\u0434\u0430\u043b\u043e\u0441\u044c \u043f\u043e\u0441\u0442\u0440\u043e\u0438\u0442\u044c overlay \u0434\u043b\u044f \u0442\u0435\u043a\u0443\u0449\u0435\u0433\u043e \u0441\u043e\u0441\u0442\u043e\u044f\u043d\u0438\u044f.");
   }
 }
+

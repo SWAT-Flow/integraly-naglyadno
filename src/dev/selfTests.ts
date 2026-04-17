@@ -1,4 +1,5 @@
 import { clampView } from "../math/numeric";
+import { LEARNING_MODULES } from "../learning/modules";
 import {
   compileExpression,
   evaluateCompiled,
@@ -34,6 +35,7 @@ function makeExpression(id: string, evaluate: (x: number) => number): CompiledEx
 export function runSelfTests(): SelfTestResult[] {
   const sinCompiled = compileExpression("sin(x)");
   const sinBroken = compileExpression("sin(");
+  const sqrtOpen = compileExpression("sqrt(");
   const constantsCompiled = compileExpression("pi + e + x");
   const logCompiled = compileExpression("log(2, 8)");
   const advancedCompiled = compileExpression("asinh(x) + sec(0)");
@@ -90,8 +92,28 @@ export function runSelfTests(): SelfTestResult[] {
     validExpressions,
     validMap,
   );
+  const averageOverlay = buildOverlay(
+    { mode: "averageValue", exprA: "f", a: 0, b: 2, n: 5, sample: "mid" },
+    validExpressions,
+    validMap,
+  );
+  const newtonOverlay = buildOverlay(
+    { mode: "newtonLeibniz", exprA: "f", a: 0, b: 2, n: 5, sample: "mid" },
+    validExpressions,
+    validMap,
+  );
   const clampedView = clampView({ xMin: -5000, xMax: 5000, yMin: -3, yMax: 3 });
   const shiftedView = clampView({ xMin: 995, xMax: 1005, yMin: -1, yMax: 1 });
+  const allPracticeItems = LEARNING_MODULES.flatMap((module) =>
+    module.sections.flatMap((section) => (section.type === "practice" ? section.items : [])),
+  );
+  const everyPracticeHasPreset = LEARNING_MODULES.every((module) => {
+    const presetIds = new Set(module.presets.map((preset) => preset.id));
+
+    return module.sections.every(
+      (section) => section.type !== "practice" || section.items.every((item) => presetIds.has(item.presetId)),
+    );
+  });
 
   return [
     pass(`normalizeExpression strips y = prefix`, normalizeExpression("y = x^2") === "x^2"),
@@ -112,6 +134,8 @@ export function runSelfTests(): SelfTestResult[] {
       `formatExpressionText renders sqrt without brackets`,
       formatExpressionText("sqrt(x)") === "\u221ax",
     ),
+    pass(`formatExpressionText keeps pretty sqrt for "sqrt("`, formatExpressionText("sqrt(") === "\u221a"),
+    pass(`formatExpressionText keeps pretty sqrt for "sqrt()"`, formatExpressionText("sqrt()") === "\u221a"),
     pass(
       `formatExpressionText renders acos as inverse cosine`,
       formatExpressionText("acos(x)") === "cos\u207b\u00b9 x",
@@ -122,6 +146,10 @@ export function runSelfTests(): SelfTestResult[] {
     ),
     pass(`compileExpression("sin(x)") succeeds`, sinCompiled.ok),
     pass(`compileExpression("sin(") returns an error`, !sinBroken.ok),
+    pass(
+      `compileExpression("sqrt(") reports missing argument`,
+      !sqrtOpen.ok && sqrtOpen.error.includes("Введите аргумент"),
+    ),
     pass(`compileExpression("tanx") succeeds`, tanImplicitCompiled.ok),
     pass(
       `compileExpression("x=siny") succeeds as x=f(y)`,
@@ -150,6 +178,11 @@ export function runSelfTests(): SelfTestResult[] {
       sinCompiled.ok ? Math.abs(evaluateCompiled(sinCompiled.compiled, Math.PI / 2) - 1) < 1e-6 : false,
     ),
     pass(`normalizeTool repairs missing exprA/exprB`, normalizedTool.exprA === "f" && normalizedTool.exprB === "g"),
+    pass(
+      `normalizeTool accepts new modes`,
+      normalizeTool({ mode: "newtonLeibniz" }, validExpressions).mode === "newtonLeibniz" &&
+        normalizeTool({ mode: "averageValue" }, validExpressions).mode === "averageValue",
+    ),
     pass(`normalizeTool clamps a/b to [-1000, 1000]`, normalizedTool.a === -1000 && normalizedTool.b === 1000),
     pass(`normalizeTool enforces n >= 2`, normalizedTool.n === 2),
     pass(
@@ -178,6 +211,58 @@ export function runSelfTests(): SelfTestResult[] {
       volumeOverlay.volumePreview !== null &&
         volumeOverlay.volumePreview.a >= -1000 &&
         volumeOverlay.volumePreview.b <= 1000,
+    ),
+    pass(
+      `average value overlay computes mean and returns guide line`,
+      averageOverlay.metrics.some((metric) => metric.label === "\u0421\u0440\u0435\u0434\u043d\u0435\u0435 \u0437\u043d\u0430\u0447\u0435\u043d\u0438\u0435" && metric.value === "1") &&
+        averageOverlay.polylines.length > 0,
+    ),
+    pass(
+      `average value overlay adds overlay shading for the average rectangle`,
+      averageOverlay.regions.length >= 2,
+    ),
+    pass(
+      `newton-leibniz overlay stays safe and returns formula steps`,
+      newtonOverlay.metrics.length > 0 &&
+        newtonOverlay.formulaSteps.length >= 2 &&
+        newtonOverlay.explanation.length > 0,
+    ),
+    pass(`learning registry contains exactly 10 modules`, LEARNING_MODULES.length === 10),
+    pass(
+      `every module has title summary and content`,
+      LEARNING_MODULES.every((module) => module.title && module.summary && module.sections.length > 0),
+    ),
+    pass(
+      `every module has preset or practice`,
+      LEARNING_MODULES.every(
+        (module) =>
+          module.presets.length > 0 ||
+          module.sections.some((section) => section.type === "practice" && section.items.length > 0),
+      ),
+    ),
+    pass(
+      `every module contains basic medium and hard practice examples`,
+      LEARNING_MODULES.every((module) => {
+        const practiceSection = module.sections.find((section) => section.type === "practice");
+        if (!practiceSection || practiceSection.type !== "practice" || practiceSection.items.length !== 3) {
+          return false;
+        }
+
+        const levels = practiceSection.items.map((item) => item.level);
+        return levels.includes("Базовый") && levels.includes("Средний") && levels.includes("Сложный");
+      }),
+    ),
+    pass(`every practice item has a calculator preset id`, allPracticeItems.every((item) => Boolean(item.presetId))),
+    pass(`every practice item resolves to a valid calculator preset`, everyPracticeHasPreset),
+    pass(
+      `learning presets use supported tool modes`,
+      LEARNING_MODULES.every((module) =>
+        module.presets.every((preset) =>
+          ["none", "under", "between", "riemann", "trap", "volume", "newtonLeibniz", "averageValue"].includes(
+            preset.tool.mode ?? "none",
+          ),
+        ),
+      ),
     ),
   ];
 }

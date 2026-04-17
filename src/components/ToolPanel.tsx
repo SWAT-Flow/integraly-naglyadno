@@ -70,6 +70,10 @@ function currentFormulaTex(tool: ToolState, validExpressions: CompiledExpression
       )}} \\left.${texA}\\right|_{x=x_i} + \\left.${texA}\\right|_{x=x_${tool.n}}\\right)`;
     case "volume":
       return `V = \\pi \\int_{${aTex}}^{${bTex}} \\left(${texA}\\right)^2\\,dx`;
+    case "newtonLeibniz":
+      return `\\int_{${aTex}}^{${bTex}} ${texA}\\,dx = F(${bTex}) - F(${aTex})`;
+    case "averageValue":
+      return `f_{\\text{avg}} = \\frac{1}{${bTex}-${aTex}}\\int_{${aTex}}^{${bTex}} ${texA}\\,dx`;
     default:
       return null;
   }
@@ -79,12 +83,15 @@ export function ToolPanel({ tool, validExpressions, overlay, onChange }: ToolPan
   const options = expressionOptions(validExpressions);
   const hasExpressions = validExpressions.length > 0;
   const formulaTex = currentFormulaTex(tool, validExpressions) ?? overlay.formulaTex;
+  const formulaSteps = overlay.formulaSteps.length ? overlay.formulaSteps : formulaTex ? [formulaTex] : [];
   const showA =
     tool.mode === "under" ||
     tool.mode === "between" ||
     tool.mode === "riemann" ||
     tool.mode === "trap" ||
-    tool.mode === "volume";
+    tool.mode === "volume" ||
+    tool.mode === "newtonLeibniz" ||
+    tool.mode === "averageValue";
   const showB = tool.mode === "between";
   const showSample = tool.mode === "riemann";
   const showN = tool.mode === "riemann" || tool.mode === "trap";
@@ -148,9 +155,11 @@ export function ToolPanel({ tool, validExpressions, overlay, onChange }: ToolPan
 
       <Card
         title="\u0424\u043e\u0440\u043c\u0443\u043b\u0430"
-        subtitle="KaTeX \u043f\u043e\u043a\u0430\u0437\u044b\u0432\u0430\u0435\u0442 \u0430\u043a\u0442\u0443\u0430\u043b\u044c\u043d\u0443\u044e \u0444\u043e\u0440\u043c\u0443\u043b\u0443 \u0434\u043b\u044f \u0432\u044b\u0431\u0440\u0430\u043d\u043d\u044b\u0445 \u0444\u0443\u043d\u043a\u0446\u0438\u0439 \u0438 \u0433\u0440\u0430\u043d\u0438\u0446."
+        subtitle="\u0417\u0434\u0435\u0441\u044c \u043f\u043e\u043a\u0430\u0437\u044b\u0432\u0430\u0435\u0442\u0441\u044f \u0430\u043a\u0442\u0443\u0430\u043b\u044c\u043d\u0430\u044f \u0444\u043e\u0440\u043c\u0443\u043b\u0430 \u0434\u043b\u044f \u0432\u044b\u0431\u0440\u0430\u043d\u043d\u044b\u0445 \u0444\u0443\u043d\u043a\u0446\u0438\u0439 \u0438 \u0433\u0440\u0430\u043d\u0438\u0446."
       >
-        <FormulaCard tex={formulaTex} />
+        <div className="formula-stack">
+          {formulaSteps.length ? formulaSteps.map((step, index) => <FormulaCard key={`${step}-${index}`} tex={step} />) : null}
+        </div>
       </Card>
 
       <Card
@@ -160,10 +169,23 @@ export function ToolPanel({ tool, validExpressions, overlay, onChange }: ToolPan
         <MetricGrid metrics={overlay.metrics} />
       </Card>
 
+      {overlay.explanation.length ? (
+        <Card
+          title="\u041f\u043e\u044f\u0441\u043d\u0435\u043d\u0438\u0435"
+          subtitle="\u041a\u043e\u0440\u043e\u0442\u043a\u043e\u0435 \u0447\u0435\u043b\u043e\u0432\u0435\u043a\u043e\u0447\u0438\u0442\u0430\u0435\u043c\u043e\u0435 \u043e\u0431\u044a\u044f\u0441\u043d\u0435\u043d\u0438\u0435 \u0432\u044b\u0431\u0440\u0430\u043d\u043d\u043e\u0433\u043e \u0440\u0435\u0436\u0438\u043c\u0430."
+        >
+          <div className="explanation-block">
+            {overlay.explanation.map((paragraph, index) => (
+              <p key={`${paragraph}-${index}`}>{paragraph}</p>
+            ))}
+          </div>
+        </Card>
+      ) : null}
+
       {tool.mode === "volume" ? (
         <Card
           title="\u041f\u0440\u0435\u0434\u043f\u0440\u043e\u0441\u043c\u043e\u0442\u0440 \u043e\u0431\u044a\u0435\u043c\u0430"
-          subtitle="\u041e\u0442\u0434\u0435\u043b\u044c\u043d\u044b\u0439 canvas \u043f\u043e\u043a\u0430\u0437\u044b\u0432\u0430\u0435\u0442 \u0432\u0440\u0430\u0449\u0435\u043d\u0438\u0435 \u043e\u0431\u043b\u0430\u0441\u0442\u0438 \u0432\u043e\u043a\u0440\u0443\u0433 \u043e\u0441\u0438 Ox."
+          subtitle="\u041e\u0442\u0434\u0435\u043b\u044c\u043d\u044b\u0439 \u0433\u0440\u0430\u0444\u0438\u043a \u043f\u043e\u043a\u0430\u0437\u044b\u0432\u0430\u0435\u0442 \u0432\u0440\u0430\u0449\u0435\u043d\u0438\u0435 \u043e\u0431\u043b\u0430\u0441\u0442\u0438 \u0432\u043e\u043a\u0440\u0443\u0433 \u043e\u0441\u0438 Ox."
         >
           <VolumePreview data={overlay.volumePreview} />
         </Card>

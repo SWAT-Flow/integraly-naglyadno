@@ -72,6 +72,18 @@ const IMPLICIT_UNARY_FUNCTIONS = [
   "ln",
 ] as const;
 
+const INCOMPLETE_UNARY_FUNCTIONS = IMPLICIT_UNARY_FUNCTIONS.filter((name) => name !== "log");
+
+const EMPTY_UNARY_FUNCTION_PATTERN = new RegExp(
+  `^(?:${INCOMPLETE_UNARY_FUNCTIONS.join("|")})\\s*\\(\\s*\\)$`,
+  "i",
+);
+
+const OPEN_UNARY_FUNCTION_PATTERN = new RegExp(
+  `^(?:${INCOMPLETE_UNARY_FUNCTIONS.join("|")})(?:\\s*\\(\\s*)?$`,
+  "i",
+);
+
 const IMPLICIT_FUNCTION_PATTERN = new RegExp(
   `\\b(${IMPLICIT_UNARY_FUNCTIONS.join("|")})\\s*(pi|e|x|y)\\b`,
   "gi",
@@ -290,12 +302,12 @@ function suggestOrientationMessage(orientation: ExpressionOrientation, normalize
 }
 
 function getIncompleteExpressionMessage(normalized: string): string | null {
-  if (
-    /^(?:asin|acos|atan|asec|acsc|acot|asinh|acosh|atanh|sin|cos|tan|sec|csc|cot|sinh|cosh|tanh|sqrt|abs|exp|ln)\(\s*\)$/i.test(
-      normalized,
-    )
-  ) {
+  if (EMPTY_UNARY_FUNCTION_PATTERN.test(normalized) || OPEN_UNARY_FUNCTION_PATTERN.test(normalized)) {
     return "\u0412\u0432\u0435\u0434\u0438\u0442\u0435 \u0430\u0440\u0433\u0443\u043c\u0435\u043d\u0442 \u0432\u043d\u0443\u0442\u0440\u0438 \u0441\u043a\u043e\u0431\u043e\u043a.";
+  }
+
+  if (/^log(?:\s*\(\s*)?$/i.test(normalized) || /^log\(\s*,?\s*\)?$/i.test(normalized)) {
+    return "\u0412\u0432\u0435\u0434\u0438\u0442\u0435 \u043e\u0441\u043d\u043e\u0432\u0430\u043d\u0438\u0435 \u0438 \u0430\u0440\u0433\u0443\u043c\u0435\u043d\u0442 \u043b\u043e\u0433\u0430\u0440\u0438\u0444\u043c\u0430.";
   }
 
   if (/^log\(\s*,\s*\)$/i.test(normalized)) {
@@ -634,6 +646,7 @@ function formatLooseExpressionText(value: string): string {
   display = display.replace(/\bpi\b/gi, "\u03c0");
   display = display.replace(/\bsqrt\b/gi, "\u221a");
   display = display.replace(/\babs\s*\(/gi, "|");
+  display = display.replace(/√\(\s*$/u, "√");
   display = display.replace(/\(\s*\)/g, "");
   display = display.replace(/\^([+-]?\d+)/g, (_match, exponent: string) => toSuperscript(exponent));
   display = display.replace(/\s+/g, " ").trim();

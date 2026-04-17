@@ -1,7 +1,15 @@
 export type Tone = "slate" | "blue" | "emerald" | "rose" | "amber" | "violet";
 export type ExpressionOrientation = "yOfX" | "xOfY";
 
-export type ToolMode = "none" | "under" | "between" | "riemann" | "trap" | "volume";
+export type ToolMode =
+  | "none"
+  | "under"
+  | "between"
+  | "riemann"
+  | "trap"
+  | "volume"
+  | "newtonLeibniz"
+  | "averageValue";
 export type SampleMode = "left" | "mid" | "right";
 
 export interface ExpressionDraft {
@@ -106,6 +114,8 @@ export interface OverlayData {
   verticals: GraphVertical[];
   metrics: OverlayMetric[];
   formulaTex: string | null;
+  formulaSteps: string[];
+  explanation: string[];
   volumePreview: VolumePreviewData | null;
 }
 
@@ -114,4 +124,17 @@ export interface ViewBox {
   xMax: number;
   yMin: number;
   yMax: number;
+}
+
+export interface LearningPresetExpression {
+  text: string;
+  visible?: boolean;
+  color?: string;
+}
+
+export interface LearningPresetScenario {
+  expressions: LearningPresetExpression[];
+  tool: Partial<ToolState>;
+  view?: Partial<ViewBox>;
+  highlightedExplanation?: string | null;
 }
