@@ -223,9 +223,120 @@ interface UnderOverlaySnapshot {
   regions: GraphRegion[];
   roots: number[];
   breaks: number[];
-  signedIntegral: number;
-  geometricArea: number;
+  signedIntegral: ImproperIntegralEstimate;
+  geometricArea: ImproperIntegralEstimate;
   points: GraphPoint[];
+}
+
+interface ImproperIntegralEstimate {
+  value: number;
+  converges: boolean;
+  improperAtBoundary: boolean;
+}
+
+function isBoundarySingular(
+  fn: (x: number) => number,
+  boundary: number,
+  oppositeBoundary: number,
+): boolean {
+  const boundaryValue = fn(boundary);
+  if (!Number.isFinite(boundaryValue)) {
+    return true;
+  }
+
+  const width = Math.abs(oppositeBoundary - boundary);
+  if (width <= 1e-6) {
+    return false;
+  }
+
+  const direction = oppositeBoundary >= boundary ? 1 : -1;
+  const offsets = [width / 4096, width / 2048, width / 1024];
+
+  return offsets.some((offset) => {
+    const x = boundary + direction * Math.max(offset, 1e-6);
+    return !Number.isFinite(fn(x));
+  });
+}
+
+function estimateBoundaryImproperIntegral(
+  fn: (x: number) => number,
+  a: number,
+  b: number,
+): ImproperIntegralEstimate {
+  const [left, right] = sortAB(a, b);
+  const width = right - left;
+
+  if (width <= 1e-6) {
+    return {
+      value: 0,
+      converges: true,
+      improperAtBoundary: false,
+    };
+  }
+
+  const leftSingular = isBoundarySingular(fn, left, right);
+  const rightSingular = isBoundarySingular(fn, right, left);
+
+  if (!leftSingular && !rightSingular) {
+    const value = midpointIntegral(fn, a, b);
+    return {
+      value,
+      converges: Number.isFinite(value),
+      improperAtBoundary: false,
+    };
+  }
+
+  const truncatedValues: number[] = [];
+  const startPower = 5;
+  const levels = 12;
+
+  for (let level = 0; level < levels; level += 1) {
+    const epsilonLeft = leftSingular ? width / 2 ** (startPower + level) : 0;
+    const epsilonRight = rightSingular ? width / 2 ** (startPower + level) : 0;
+    const start = left + epsilonLeft;
+    const end = right - epsilonRight;
+
+    if (!(end > start)) {
+      break;
+    }
+
+    const value = midpointIntegral(fn, start, end, 2400);
+    if (!Number.isFinite(value)) {
+      return {
+        value: Number.NaN,
+        converges: false,
+        improperAtBoundary: true,
+      };
+    }
+
+    truncatedValues.push(value);
+  }
+
+  if (truncatedValues.length < 4) {
+    return {
+      value: Number.NaN,
+      converges: false,
+      improperAtBoundary: true,
+    };
+  }
+
+  const deltas = truncatedValues.slice(1).map((value, index) => Math.abs(value - truncatedValues[index]));
+  const tailWindow = deltas.slice(-4);
+  const converges = tailWindow.length > 0 && Math.max(...tailWindow) < 0.02;
+
+  return {
+    value: truncatedValues[truncatedValues.length - 1],
+    converges,
+    improperAtBoundary: true,
+  };
+}
+
+function formatIntegralEstimate(estimate: ImproperIntegralEstimate, digits = 5): string {
+  return estimate.converges ? formatNumber(estimate.value, digits) : "расходится";
+}
+
+function integralEstimateTex(estimate: ImproperIntegralEstimate, digits = 5): string {
+  return estimate.converges ? formatNumber(estimate.value, digits) : "\\text{расходится}";
 }
 
 function buildUnderSnapshot(fn: (x: number) => number, a: number, b: number): UnderOverlaySnapshot {
@@ -254,8 +365,8 @@ function buildUnderSnapshot(fn: (x: number) => number, a: number, b: number): Un
     });
   }
 
-  const signedIntegral = midpointIntegral(fn, a, b);
-  const geometricArea = midpointIntegral((x) => Math.abs(fn(x)), a, b);
+  const signedIntegral = estimateBoundaryImproperIntegral(fn, a, b);
+  const geometricArea = estimateBoundaryImproperIntegral((x) => Math.abs(fn(x)), a, b);
   const points = roots
     .map((x) => ({ x, y: 0, color: COLORS.violet, label: `x=${formatNumber(x, 3)}` }))
     .filter((point) => point.x >= a && point.x <= b);
@@ -307,7 +418,18 @@ export function buildOverlay(
       }
       const snapshot = buildUnderSnapshot(fnA, a, b);
       const texA = expressionA ? expressionToTex(expressionA.normalized) : "f(x)";
-      const hasFiniteValues = Number.isFinite(snapshot.signedIntegral) || Number.isFinite(snapshot.geometricArea);
+      const hasFiniteValues = snapshot.signedIntegral.converges || snapshot.geometricArea.converges;
+      const divergenceExplanation =
+        !snapshot.signedIntegral.converges || !snapshot.geometricArea.converges
+          ? [
+              "\u0423 \u0433\u0440\u0430\u043d\u0438\u0446\u044b \u0435\u0441\u0442\u044c \u043d\u0435\u0441\u043e\u0431\u0441\u0442\u0432\u0435\u043d\u043d\u0430\u044f \u043e\u0441\u043e\u0431\u0435\u043d\u043d\u043e\u0441\u0442\u044c, \u0438 \u0443\u0441\u0435\u0447\u0451\u043d\u043d\u044b\u0435 \u0438\u043d\u0442\u0435\u0433\u0440\u0430\u043b\u044b \u043d\u0435 \u0441\u0442\u0430\u0431\u0438\u043b\u0438\u0437\u0438\u0440\u0443\u044e\u0442\u0441\u044f.",
+              "\u041f\u043e\u044d\u0442\u043e\u043c\u0443 \u0438 \u043f\u043e\u0434\u043f\u0438\u0441\u0430\u043d\u043d\u044b\u0439 \u0438\u043d\u0442\u0435\u0433\u0440\u0430\u043b, \u0438 \u0433\u0435\u043e\u043c\u0435\u0442\u0440\u0438\u0447\u0435\u0441\u043a\u0430\u044f \u043f\u043b\u043e\u0449\u0430\u0434\u044c \u043f\u043e\u043c\u0435\u0447\u0430\u044e\u0442\u0441\u044f \u043a\u0430\u043a \u0440\u0430\u0441\u0445\u043e\u0434\u044f\u0449\u0438\u0435\u0441\u044f.",
+            ]
+          : snapshot.signedIntegral.improperAtBoundary || snapshot.geometricArea.improperAtBoundary
+            ? [
+                "\u041d\u0430 \u0433\u0440\u0430\u043d\u0438\u0446\u0435 \u0435\u0441\u0442\u044c \u043d\u0435\u0441\u043e\u0431\u0441\u0442\u0432\u0435\u043d\u043d\u0430\u044f \u043e\u0441\u043e\u0431\u0435\u043d\u043d\u043e\u0441\u0442\u044c, \u043d\u043e \u0443\u0441\u0435\u0447\u0451\u043d\u043d\u044b\u0435 \u0438\u043d\u0442\u0435\u0433\u0440\u0430\u043b\u044b \u0441\u0442\u0430\u0431\u0438\u043b\u0438\u0437\u0438\u0440\u0443\u044e\u0442\u0441\u044f, \u043f\u043e\u044d\u0442\u043e\u043c\u0443 \u043d\u0435\u0441\u043e\u0431\u0441\u0442\u0432\u0435\u043d\u043d\u044b\u0439 \u0438\u043d\u0442\u0435\u0433\u0440\u0430\u043b \u0441\u0445\u043e\u0434\u0438\u0442\u0441\u044f.",
+              ]
+            : [];
 
       return {
         regions: snapshot.regions,
@@ -319,12 +441,12 @@ export function buildOverlay(
           [
             {
               label: "\u041f\u043e\u0434\u043f\u0438\u0441\u0430\u043d\u043d\u044b\u0439 \u0438\u043d\u0442\u0435\u0433\u0440\u0430\u043b",
-              value: formatNumber(snapshot.signedIntegral),
+              value: formatIntegralEstimate(snapshot.signedIntegral),
               tone: "blue",
             },
             {
               label: "\u0413\u0435\u043e\u043c\u0435\u0442\u0440\u0438\u0447\u0435\u0441\u043a\u0430\u044f \u043f\u043b\u043e\u0449\u0430\u0434\u044c",
-              value: formatNumber(snapshot.geometricArea),
+              value: formatIntegralEstimate(snapshot.geometricArea),
               tone: "emerald",
             },
             { label: "\u0418\u043d\u0442\u0435\u0440\u0432\u0430\u043b", value: `[${formatNumber(a, 3)}; ${formatNumber(b, 3)}]`, tone: "slate" },
@@ -335,12 +457,13 @@ export function buildOverlay(
         ),
         formulaTex: "\\int_a^b f(x)\\,dx\\quad\\text{\u0438}\\quad\\int_a^b |f(x)|\\,dx",
         formulaSteps: [
-          `\\int_{${formatNumber(a, 3)}}^{${formatNumber(b, 3)}} ${texA}\\,dx = ${formatNumber(snapshot.signedIntegral)}`,
-          `S_{\\text{geom}} = \\int_{${formatNumber(a, 3)}}^{${formatNumber(b, 3)}} \\left|${texA}\\right|\\,dx = ${formatNumber(snapshot.geometricArea)}`,
+          `\\int_{${formatNumber(a, 3)}}^{${formatNumber(b, 3)}} ${texA}\\,dx = ${integralEstimateTex(snapshot.signedIntegral)}`,
+          `S_{\\text{geom}} = \\int_{${formatNumber(a, 3)}}^{${formatNumber(b, 3)}} \\left|${texA}\\right|\\,dx = ${integralEstimateTex(snapshot.geometricArea)}`,
         ],
         explanation: [
           "\u041f\u043e\u0434\u043f\u0438\u0441\u0430\u043d\u043d\u044b\u0439 \u0438\u043d\u0442\u0435\u0433\u0440\u0430\u043b \u0443\u0447\u0438\u0442\u044b\u0432\u0430\u0435\u0442, \u043b\u0435\u0436\u0438\u0442 \u043b\u0438 \u0433\u0440\u0430\u0444\u0438\u043a \u0432\u044b\u0448\u0435 \u0438\u043b\u0438 \u043d\u0438\u0436\u0435 \u043e\u0441\u0438 Ox.",
           "\u0413\u0435\u043e\u043c\u0435\u0442\u0440\u0438\u0447\u0435\u0441\u043a\u0430\u044f \u043f\u043b\u043e\u0449\u0430\u0434\u044c \u0441\u0447\u0438\u0442\u0430\u0435\u0442 \u0432\u0441\u0435 \u0443\u0447\u0430\u0441\u0442\u043a\u0438 \u043a\u0430\u043a \u043f\u043e\u043b\u043e\u0436\u0438\u0442\u0435\u043b\u044c\u043d\u044b\u0435 \u043f\u043b\u043e\u0449\u0430\u0434\u0438.",
+          ...divergenceExplanation,
         ],
         volumePreview: null,
       };
@@ -611,17 +734,17 @@ export function buildOverlay(
         verticals: buildVerticals(a, b),
         metrics: withOptionalStatus(
           [
-            { label: "\u0418\u043d\u0442\u0435\u0433\u0440\u0430\u043b", value: formatNumber(snapshot.signedIntegral), tone: "blue" },
+            { label: "\u0418\u043d\u0442\u0435\u0433\u0440\u0430\u043b", value: formatIntegralEstimate(snapshot.signedIntegral), tone: "blue" },
             { label: "\u0418\u043d\u0442\u0435\u0440\u0432\u0430\u043b", value: `[${formatNumber(a, 3)}; ${formatNumber(b, 3)}]`, tone: "slate" },
             { label: "\u041a\u043e\u0440\u043d\u0438", value: String(snapshot.points.length), tone: "violet" },
           ],
           "\u041d\u0430 \u0432\u044b\u0431\u0440\u0430\u043d\u043d\u043e\u043c \u0438\u043d\u0442\u0435\u0440\u0432\u0430\u043b\u0435 \u043d\u0435\u0442 \u043a\u043e\u043d\u0435\u0447\u043d\u044b\u0445 \u0437\u043d\u0430\u0447\u0435\u043d\u0438\u0439.",
-          !snapshot.regions.length && !Number.isFinite(snapshot.signedIntegral),
+          !snapshot.regions.length && !snapshot.signedIntegral.converges,
         ),
         formulaTex: `\\int_{${formatNumber(a, 3)}}^{${formatNumber(b, 3)}} ${texA}\\,dx = F(${formatNumber(b, 3)}) - F(${formatNumber(a, 3)})`,
         formulaSteps: [
           `\\int_{${formatNumber(a, 3)}}^{${formatNumber(b, 3)}} ${texA}\\,dx = F(${formatNumber(b, 3)}) - F(${formatNumber(a, 3)})`,
-          `\\int_{${formatNumber(a, 3)}}^{${formatNumber(b, 3)}} ${texA}\\,dx \\approx ${formatNumber(snapshot.signedIntegral)}`,
+          `\\int_{${formatNumber(a, 3)}}^{${formatNumber(b, 3)}} ${texA}\\,dx \\approx ${integralEstimateTex(snapshot.signedIntegral)}`,
         ],
         explanation: [
           "\u0420\u0435\u0436\u0438\u043c \u043f\u043e\u043a\u0430\u0437\u044b\u0432\u0430\u0435\u0442 \u0438\u0434\u0435\u044e \u0444\u043e\u0440\u043c\u0443\u043b\u044b \u041d\u044c\u044e\u0442\u043e\u043d\u0430-\u041b\u0435\u0439\u0431\u043d\u0438\u0446\u0430: \u0438\u043d\u0442\u0435\u0433\u0440\u0430\u043b \u0440\u0430\u0432\u0435\u043d \u0438\u0437\u043c\u0435\u043d\u0435\u043d\u0438\u044e \u043f\u0435\u0440\u0432\u043e\u043e\u0431\u0440\u0430\u0437\u043d\u043e\u0439 \u043d\u0430 \u043a\u043e\u043d\u0446\u0430\u0445 \u043e\u0442\u0440\u0435\u0437\u043a\u0430.",
@@ -641,7 +764,7 @@ export function buildOverlay(
 
       const snapshot = buildUnderSnapshot(fnA, a, b);
       const integral = snapshot.signedIntegral;
-      const averageValue = Number.isFinite(integral) ? integral / (b - a) : Number.NaN;
+      const averageValue = integral.converges ? integral.value / (b - a) : Number.NaN;
       const texA = expressionA ? expressionToTex(expressionA.normalized) : "f(x)";
       const averageFn = () => averageValue;
       const averageRegion: GraphRegion[] = Number.isFinite(averageValue)
@@ -684,7 +807,7 @@ export function buildOverlay(
         metrics: withOptionalStatus(
           [
             { label: "\u0421\u0440\u0435\u0434\u043d\u0435\u0435 \u0437\u043d\u0430\u0447\u0435\u043d\u0438\u0435", value: formatNumber(averageValue), tone: "amber" },
-            { label: "\u0418\u043d\u0442\u0435\u0433\u0440\u0430\u043b", value: formatNumber(integral), tone: "blue" },
+            { label: "\u0418\u043d\u0442\u0435\u0433\u0440\u0430\u043b", value: formatIntegralEstimate(integral), tone: "blue" },
             { label: "\u0418\u043d\u0442\u0435\u0440\u0432\u0430\u043b", value: `[${formatNumber(a, 3)}; ${formatNumber(b, 3)}]`, tone: "slate" },
           ],
           "\u041d\u0435 \u0443\u0434\u0430\u043b\u043e\u0441\u044c \u043a\u043e\u0440\u0440\u0435\u043a\u0442\u043d\u043e \u043e\u0446\u0435\u043d\u0438\u0442\u044c \u0441\u0440\u0435\u0434\u043d\u0435\u0435 \u0437\u043d\u0430\u0447\u0435\u043d\u0438\u0435.",
@@ -693,8 +816,8 @@ export function buildOverlay(
         formulaTex: `f_{\\text{avg}} = \\frac{1}{${formatNumber(b - a, 3)}}\\int_{${formatNumber(a, 3)}}^{${formatNumber(b, 3)}} ${texA}\\,dx`,
         formulaSteps: [
           `f_{\\text{avg}} = \\frac{1}{${formatNumber(b - a, 3)}}\\int_{${formatNumber(a, 3)}}^{${formatNumber(b, 3)}} ${texA}\\,dx`,
-          `f_{\\text{avg}} = \\frac{${formatNumber(integral)}}{${formatNumber(b - a, 3)}}`,
-          `f_{\\text{avg}} = ${formatNumber(averageValue)}`,
+          `f_{\\text{avg}} = \\frac{${integralEstimateTex(integral)}}{${formatNumber(b - a, 3)}}`,
+          `f_{\\text{avg}} = ${Number.isFinite(averageValue) ? formatNumber(averageValue) : "\\text{расходится}"}`,
         ],
         explanation: [
           "\u0421\u0440\u0435\u0434\u043d\u0435\u0435 \u0437\u043d\u0430\u0447\u0435\u043d\u0438\u0435 \u0444\u0443\u043d\u043a\u0446\u0438\u0438 \u2014 \u044d\u0442\u043e \u0442\u0430\u043a\u0430\u044f \u0432\u044b\u0441\u043e\u0442\u0430 \u043f\u0440\u044f\u043c\u043e\u0443\u0433\u043e\u043b\u044c\u043d\u0438\u043a\u0430 \u043d\u0430 \u0442\u043e\u043c \u0436\u0435 \u043e\u0441\u043d\u043e\u0432\u0430\u043d\u0438\u0438, \u043f\u0440\u0438 \u043a\u043e\u0442\u043e\u0440\u043e\u0439 \u043f\u043b\u043e\u0449\u0430\u0434\u044c \u0441\u043e\u0432\u043f\u0430\u0434\u0430\u0435\u0442.",

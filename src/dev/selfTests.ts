@@ -1,11 +1,16 @@
 import { clampView } from "../math/numeric";
+import { buildPrettyExpression, snapshotPrettyExpression } from "../math/prettyExpression";
+import { tokenizeInlineMath } from "../learning/inlineMath";
 import { LEARNING_MODULES } from "../learning/modules";
+import { normalizeFormulaInput } from "../components/FormulaCard";
 import {
   compileExpression,
   evaluateCompiled,
   expressionToTex,
+  formatExpressionInputText,
   formatExpressionText,
   normalizeExpression,
+  parseExpressionInputText,
 } from "../math/parser";
 import type { CompiledExpression } from "../types";
 import { buildOverlay } from "../tools/buildOverlay";
@@ -32,6 +37,23 @@ function makeExpression(id: string, evaluate: (x: number) => number): CompiledEx
   };
 }
 
+function makeCompiledExpression(id: string, text: string, color = "#2563eb"): CompiledExpression | null {
+  const compiled = compileExpression(text);
+  if (!compiled.ok) {
+    return null;
+  }
+
+  return {
+    id,
+    raw: text,
+    normalized: compiled.normalized,
+    visible: true,
+    color,
+    orientation: compiled.orientation,
+    evaluate: (value: number) => evaluateCompiled(compiled.compiled, value, compiled.orientation),
+  };
+}
+
 export function runSelfTests(): SelfTestResult[] {
   const sinCompiled = compileExpression("sin(x)");
   const sinBroken = compileExpression("sin(");
@@ -42,8 +64,26 @@ export function runSelfTests(): SelfTestResult[] {
   const tanImplicitCompiled = compileExpression("tanx");
   const sidewaysCompiled = compileExpression("x=siny");
   const lnyCompiled = compileExpression("lny");
+  const inlineSqrtTokens = tokenizeInlineMath("Под графиком {{tex:y=\\sqrt{x}}} на [0,4].");
+  const prettyX2 = snapshotPrettyExpression(buildPrettyExpression("x^2"));
+  const prettyXPowGroup = snapshotPrettyExpression(buildPrettyExpression("x^(n+1)"));
+  const prettySimpleFraction = snapshotPrettyExpression(buildPrettyExpression("1/x"));
+  const prettyPowerFraction = snapshotPrettyExpression(buildPrettyExpression("1/x^2"));
+  const prettyGroupedFraction = snapshotPrettyExpression(buildPrettyExpression("(x+1)/(x-1)"));
+  const prettySqrt = snapshotPrettyExpression(buildPrettyExpression("sqrt(x)"));
+  const prettyAbs = snapshotPrettyExpression(buildPrettyExpression("abs(x)"));
+  const prettySin = snapshotPrettyExpression(buildPrettyExpression("sin(x)"));
+  const prettyLn = snapshotPrettyExpression(buildPrettyExpression("ln(x)"));
+  const prettyDanglingPower = snapshotPrettyExpression(buildPrettyExpression("x^"));
+  const prettyDanglingFraction = snapshotPrettyExpression(buildPrettyExpression("1/"));
+  const prettyDanglingSqrt = snapshotPrettyExpression(buildPrettyExpression("sqrt("));
+  const prettyDanglingSin = snapshotPrettyExpression(buildPrettyExpression("sin("));
+  const prettyDanglingPowerGroup = snapshotPrettyExpression(buildPrettyExpression("x^("));
+  const prettyDanglingPowerGroupSum = snapshotPrettyExpression(buildPrettyExpression("x^(n+"));
   const validExpressions = [makeExpression("f", (x) => x), makeExpression("g", (x) => x * x)];
   const validMap = new Map(validExpressions.map((expression) => [expression.id, expression]));
+  const logarithmExpression = makeCompiledExpression("ln-test", "ln(x)");
+  const reciprocalExpression = makeCompiledExpression("reciprocal-test", "1 / x");
 
   const normalizedTool = normalizeTool(
     {
@@ -104,6 +144,22 @@ export function runSelfTests(): SelfTestResult[] {
   );
   const clampedView = clampView({ xMin: -5000, xMax: 5000, yMin: -3, yMax: 3 });
   const shiftedView = clampView({ xMin: 995, xMax: 1005, yMin: -1, yMax: 1 });
+  const logarithmUnderOverlay =
+    logarithmExpression !== null
+      ? buildOverlay(
+          { mode: "under", exprA: "ln-test", a: 0, b: 3, n: 5, sample: "mid" },
+          [logarithmExpression],
+          new Map([["ln-test", logarithmExpression]]),
+        )
+      : null;
+  const reciprocalUnderOverlay =
+    reciprocalExpression !== null
+      ? buildOverlay(
+          { mode: "under", exprA: "reciprocal-test", a: 0, b: 3, n: 5, sample: "mid" },
+          [reciprocalExpression],
+          new Map([["reciprocal-test", reciprocalExpression]]),
+        )
+      : null;
   const allPracticeItems = LEARNING_MODULES.flatMap((module) =>
     module.sections.flatMap((section) => (section.type === "practice" ? section.items : [])),
   );
@@ -124,18 +180,55 @@ export function runSelfTests(): SelfTestResult[] {
     pass(`expressionToTex renders pi as \\pi`, expressionToTex("pi").includes("\\pi")),
     pass(`expressionToTex renders unary log as \\lg`, expressionToTex("log(x)").includes("\\lg")),
     pass(`expressionToTex renders abs with bars`, expressionToTex("abs(x)").includes("\\left|x\\right|")),
+    pass(`normalizeFormulaInput preserves inline \\sqrt`, normalizeFormulaInput("\\sqrt{x}") === "\\sqrt{x}"),
+    pass(
+      `inline math tokenizer keeps \\sqrt block intact`,
+      inlineSqrtTokens.length === 3 &&
+        inlineSqrtTokens[1]?.type === "tex" &&
+        inlineSqrtTokens[1]?.value === "y=\\sqrt{x}",
+    ),
     pass(`expressionToTex renders acos as inverse cosine`, expressionToTex("acos(x)").includes("\\cos^{-1}")),
     pass(`expressionToTex renders acosh as inverse hyperbolic cosine`, expressionToTex("acosh(x)").includes("\\cosh^{-1}")),
     pass(`formatExpressionText renders abs as bars`, formatExpressionText("abs(x)") === "|x|"),
     pass(`formatExpressionText renders x^2 with superscript`, formatExpressionText("x^2 / 6") === "x\u00b2 / 6"),
     pass(`formatExpressionText renders unary log as lg`, formatExpressionText("log(x)") === "lg x"),
     pass(`formatExpressionText renders base log with subscript`, formatExpressionText("log(5, x)") === "log\u2085 x"),
+    pass(`formatExpressionText renders bare sqrt as root sign`, formatExpressionText("sqrt") === "\u221a"),
+    pass(`pretty renderer builds x^2 as a power node`, prettyX2 === "pow(x|2)"),
+    pass(`pretty renderer builds x^(n+1) with grouped exponent`, prettyXPowGroup === "pow(x|group(seq(n + 1)))"),
+    pass(`pretty renderer builds 1/x as a fraction`, prettySimpleFraction === "frac(1|x)"),
+    pass(`pretty renderer builds 1/x^2 as fraction over a power`, prettyPowerFraction === "frac(1|pow(x|2))"),
     pass(
-      `formatExpressionText renders sqrt without brackets`,
-      formatExpressionText("sqrt(x)") === "\u221ax",
+      `pretty renderer builds (x+1)/(x-1) as grouped fraction`,
+      prettyGroupedFraction === "frac(group(seq(x + 1))|group(seq(x − 1)))",
     ),
-    pass(`formatExpressionText keeps pretty sqrt for "sqrt("`, formatExpressionText("sqrt(") === "\u221a"),
-    pass(`formatExpressionText keeps pretty sqrt for "sqrt()"`, formatExpressionText("sqrt()") === "\u221a"),
+    pass(`pretty renderer builds sqrt(x) as root`, prettySqrt === "sqrt(x)"),
+    pass(`pretty renderer builds abs(x) as modulus`, prettyAbs === "abs(x)"),
+    pass(`pretty renderer builds sin(x) as a function node`, prettySin === "fn(sin|x)"),
+    pass(`pretty renderer builds ln(x) as a function node`, prettyLn === "fn(ln|x)"),
+    pass(`pretty renderer keeps x^ as an incomplete power`, prettyDanglingPower === "pow(x|□)"),
+    pass(`pretty renderer keeps 1/ as an incomplete fraction`, prettyDanglingFraction === "frac(1|□)"),
+    pass(`pretty renderer keeps sqrt( as an incomplete root`, prettyDanglingSqrt === "sqrt(□)"),
+    pass(`pretty renderer keeps sin( as an incomplete function call`, prettyDanglingSin === "fn(sin|□)"),
+    pass(`pretty renderer keeps x^( as an open grouped exponent`, prettyDanglingPowerGroup === "pow(x|group-open(□))"),
+    pass(
+      `pretty renderer keeps x^(n+ as an open grouped exponent sum`,
+      prettyDanglingPowerGroupSum === "pow(x|group-open(seq(n + □)))",
+    ),
+    pass(`formatExpressionInputText renders sqrt inline`, formatExpressionInputText("sqrt(x)") === "\u221a(x)"),
+    pass(`formatExpressionInputText renders pi inline`, formatExpressionInputText("pi / 2") === "\u03c0 / 2"),
+    pass(`formatExpressionInputText renders dangling exponent slot as blank`, formatExpressionInputText("x^") === "x\u200a"),
+    pass(`formatExpressionInputText renders simple fraction inline`, formatExpressionInputText("1/x") === "\u00b9\u2044\u2093"),
+    pass(`parseExpressionInputText restores sqrt`, parseExpressionInputText("\u221a(x)") === "sqrt(x)"),
+    pass(`parseExpressionInputText restores superscripts`, parseExpressionInputText("x\u00b2") === "x^2"),
+    pass(`parseExpressionInputText restores exponent placeholder`, parseExpressionInputText("x\u200a") === "x^"),
+    pass(`parseExpressionInputText restores simple fraction`, parseExpressionInputText("\u00b9\u2044\u2093") === "1/x"),
+    pass(
+      `formatExpressionText renders sqrt(x) as root with brackets`,
+      formatExpressionText("sqrt(x)") === "\u221a(x)",
+    ),
+    pass(`formatExpressionText keeps pretty sqrt for "sqrt("`, formatExpressionText("sqrt(") === "\u221a("),
+    pass(`formatExpressionText keeps pretty sqrt for "sqrt()"`, formatExpressionText("sqrt()") === "\u221a()"),
     pass(
       `formatExpressionText renders acos as inverse cosine`,
       formatExpressionText("acos(x)") === "cos\u207b\u00b9 x",
@@ -200,6 +293,27 @@ export function runSelfTests(): SelfTestResult[] {
     pass(
       `buildOverlay under repairs invalid exprA safely`,
       invalidUnderOverlay.metrics.length > 0 && invalidUnderOverlay.verticals.length === 2,
+    ),
+    pass(
+      `under keeps ln(x) on [0,3] finite`,
+      logarithmUnderOverlay !== null &&
+        logarithmUnderOverlay.metrics.some(
+          (metric) => metric.label === "Подписанный интеграл" && metric.value !== "расходится" && metric.value !== "-",
+        ),
+    ),
+    pass(
+      `under marks 1/x on [0,3] as divergent`,
+      reciprocalUnderOverlay !== null &&
+        reciprocalUnderOverlay.metrics.some(
+          (metric) => metric.label === "Подписанный интеграл" && metric.value === "расходится",
+        ),
+    ),
+    pass(
+      `under marks geometric area for 1/x on [0,3] as divergent`,
+      reciprocalUnderOverlay !== null &&
+        reciprocalUnderOverlay.metrics.some(
+          (metric) => metric.label === "Геометрическая площадь" && metric.value === "расходится",
+        ),
     ),
     pass(
       `riemann/trap normalize bad n to 2`,

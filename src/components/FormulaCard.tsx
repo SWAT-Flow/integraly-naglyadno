@@ -13,7 +13,7 @@ interface InlineFormulaProps {
   className?: string;
 }
 
-function normalizeFormulaInput(tex: string) {
+export function normalizeFormulaInput(tex: string) {
   const decoded = decodeEscapedUnicode(tex);
   const looksLikePlainExpression =
     !decoded.includes("\\") &&

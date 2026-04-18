@@ -2,6 +2,7 @@ import { TOOL_LABELS } from "../constants";
 import { expressionToTex, formatExpressionText } from "../math/parser";
 import type { CompiledExpression, OverlayData, ToolState } from "../types";
 import { FormulaCard } from "./FormulaCard";
+import { PrettyExpression } from "./PrettyExpression";
 import { VolumePreview } from "./VolumePreview";
 import { Card, MetricGrid, NumberField, SelectField } from "./ui";
 
@@ -20,30 +21,32 @@ function expressionOptions(validExpressions: CompiledExpression[]) {
   return validExpressions.map((expression) => ({
     label: `${expression.orientation === "xOfY" ? "x" : "y"} = ${formatExpressionText(expression.normalized)}`,
     value: expression.id,
-    render: (
-      <FormulaCard
-        tex={expressionPreviewTex(expression)}
-        displayMode={false}
-        className="select-formula"
-      />
-    ),
-    selectedRender: (
-      <FormulaCard
-        tex={expressionPreviewTex(expression)}
-        displayMode={false}
-        className="select-formula"
-      />
-    ),
+    render: <ExpressionSelectPreview expression={expression} />,
+    selectedRender: <ExpressionSelectPreview expression={expression} compact />,
   }));
 }
 
-function expressionPreviewTex(expression: CompiledExpression | null): string | null {
-  if (!expression) {
-    return null;
-  }
+function expressionPreviewPrefix(expression: CompiledExpression | null): string {
+  return expression?.orientation === "xOfY" ? "x =" : "y =";
+}
 
-  const prefix = expression.orientation === "xOfY" ? "x = " : "y = ";
-  return `${prefix}${expressionToTex(expression.normalized)}`;
+function ExpressionSelectPreview({
+  expression,
+  compact = false,
+}: {
+  expression: CompiledExpression;
+  compact?: boolean;
+}) {
+  return (
+    <span className={`select-expression-preview ${compact ? "select-expression-preview-compact" : ""}`}>
+      <span className="select-expression-prefix">{expressionPreviewPrefix(expression)}</span>
+      <PrettyExpression
+        className="select-expression-math"
+        compact
+        expression={expression.normalized}
+      />
+    </span>
+  );
 }
 
 function currentFormulaTex(tool: ToolState, validExpressions: CompiledExpression[]): string | null {

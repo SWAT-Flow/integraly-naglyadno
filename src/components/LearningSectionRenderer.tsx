@@ -1,3 +1,4 @@
+import { tokenizeInlineMath } from "../learning/inlineMath";
 import type { LearningPreset, LearningSection } from "../learning/types";
 import { decodeEscapedUnicode } from "../utils/decodeEscapedUnicode";
 import { FormulaCard, InlineFormula } from "./FormulaCard";
@@ -10,16 +11,13 @@ interface LearningSectionRendererProps {
 }
 
 function renderInlineContent(text: string) {
-  const parts = text.split(/(\{\{tex:[\s\S]+?\}\})/g).filter(Boolean);
-
-  return parts.map((part, index) => {
-    const match = /^\{\{tex:([\s\S]+)\}\}$/.exec(part);
-    if (!match) {
-      return <span key={`${part}-${index}`}>{decodeEscapedUnicode(part)}</span>;
-    }
-
-    return <InlineFormula key={`${match[1]}-${index}`} tex={match[1]} className="learning-inline-formula" />;
-  });
+  return tokenizeInlineMath(text).map((part, index) =>
+    part.type === "tex" ? (
+      <InlineFormula key={`${part.value}-${index}`} tex={part.value} className="learning-inline-formula" />
+    ) : (
+      <span key={`${part.value}-${index}`}>{decodeEscapedUnicode(part.value)}</span>
+    ),
+  );
 }
 
 export function LearningSectionRenderer({

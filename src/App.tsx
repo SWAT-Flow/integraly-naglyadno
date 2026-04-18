@@ -176,9 +176,10 @@ export default function App() {
     clearViewOverride();
 
     input.focus();
-    const start = input.selectionStart ?? input.value.length;
-    const end = input.selectionEnd ?? input.value.length;
-    const selected = input.value.slice(start, end);
+    const source = input.value;
+    const start = input.selectionStart ?? source.length;
+    const end = input.selectionEnd ?? source.length;
+    const selected = source.slice(start, end);
 
     let nextText = template.text;
     let cursorOffset = template.cursorOffset;
@@ -188,7 +189,7 @@ export default function App() {
       cursorOffset = 0;
     }
 
-    const updated = `${input.value.slice(0, start)}${nextText}${input.value.slice(end)}`;
+    const updated = `${source.slice(0, start)}${nextText}${source.slice(end)}`;
     const nextCursor = start + nextText.length + cursorOffset;
 
     setExpressions((current) =>

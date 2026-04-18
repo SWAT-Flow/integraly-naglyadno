@@ -94,7 +94,7 @@ button {
   flex: 1;
   min-height: 0;
   gap: 20px;
-  grid-template-columns: minmax(270px, 320px) minmax(0, 1fr) minmax(280px, 340px);
+  grid-template-columns: minmax(340px, 420px) minmax(0, 1fr) minmax(280px, 340px);
   align-items: stretch;
 }
 
@@ -243,8 +243,11 @@ button {
 }
 
 .select-value {
+  display: flex;
+  align-items: center;
   min-width: 0;
   flex: 1;
+  overflow: hidden;
 }
 
 .select-caret {
@@ -299,11 +302,40 @@ button {
   padding: 0;
   border-radius: 0;
   background: transparent;
-  overflow: visible;
+  overflow: hidden;
 }
 
 .select-formula .katex {
   font-size: 1em;
+}
+
+.select-expression-preview {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  max-width: 100%;
+}
+
+.select-expression-preview-compact {
+  gap: 6px;
+}
+
+.select-expression-prefix {
+  flex: 0 0 auto;
+  color: #334155;
+  font-size: 13px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.select-expression-math {
+  min-width: 0;
+  flex: 1 1 auto;
+}
+
+.select-expression-math .katex {
+  font-size: 0.96em;
 }
 
 .field-row {
@@ -320,9 +352,9 @@ button {
 
 .expression-row {
   border: 1px solid #d9e2ec;
-  border-radius: 18px;
+  border-radius: 20px;
   background: #fbfdff;
-  padding: 10px 12px;
+  padding: 14px 16px;
 }
 
 .expression-row-active {
@@ -332,18 +364,13 @@ button {
 
 .expression-main {
   display: grid;
-  grid-template-columns: 18px minmax(0, 1fr) 36px 36px;
-  gap: 10px;
+  grid-template-columns: 18px minmax(0, 1fr) 40px 40px;
+  gap: 12px;
   align-items: center;
 }
 
 .expression-entry {
   min-width: 0;
-}
-
-.expression-editor {
-  position: relative;
-  min-height: 24px;
 }
 
 .expression-swatch {
@@ -354,6 +381,8 @@ button {
 }
 
 .expression-input {
+  flex: 1 1 auto;
+  min-width: 0;
   width: 100%;
   border: none;
   outline: none;
@@ -361,31 +390,242 @@ button {
   font-size: 15px;
 }
 
-.expression-input-overlay {
-  position: relative;
-  z-index: 1;
-  color: transparent;
-  caret-color: #0f172a;
-}
-
-.expression-live-preview {
+.expression-input-hidden {
   position: absolute;
   inset: 0;
-  display: flex;
-  align-items: center;
-  overflow: hidden;
-  color: #0f172a;
-  font-size: 15px;
-  line-height: 1.4;
-  white-space: nowrap;
+  opacity: 0;
   pointer-events: none;
+  caret-color: transparent;
+}
+
+.expression-editor-shell {
+  position: relative;
+  min-height: 64px;
+}
+
+.expression-editor-display {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  min-height: 64px;
+  padding: 6px 0;
+  color: #0f172a;
+  user-select: none;
+}
+
+.expression-editor-display-empty {
+  color: #94a3b8;
+}
+
+.expression-editor-prefix,
+.expression-display-prefix {
+  flex: 0 0 auto;
+  color: #475569;
+  font-size: 15px;
+  font-weight: 600;
+  line-height: 1.5;
+  white-space: nowrap;
+}
+
+.expression-editor-prefix {
+  border: none;
+  background: transparent;
+  padding: 4px 0 0;
+}
+
+.expression-editor-pretty,
+.expression-display-pretty {
+  min-width: 0;
+  flex: 1 1 auto;
+}
+
+.expression-editor-placeholder {
+  display: inline-flex;
+  align-items: center;
+  gap: 0;
+  min-height: 38px;
+  min-width: 0;
+  flex: 1 1 auto;
+  border: none;
+  background: transparent;
+  padding: 0;
+  color: #94a3b8;
+  text-align: left;
+}
+
+.expression-editor-placeholder-text {
+  color: #94a3b8;
+}
+
+.pretty-expression {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0;
+  min-width: 0;
+  color: #0f172a;
+  font-size: 20px;
+  line-height: 1.35;
+}
+
+.pretty-expression-compact {
+  font-size: 16px;
+  line-height: 1.24;
+}
+
+.pretty-expression-sequence,
+.pretty-expression-group,
+.pretty-expression-function,
+.pretty-expression-sqrt,
+.pretty-expression-abs,
+.pretty-expression-log-base,
+.pretty-expression-function-label {
+  display: inline-flex;
+  align-items: baseline;
+  min-width: 0;
+}
+
+.pretty-expression-token,
+.pretty-expression-hit,
+.pretty-expression-caret-anchor {
+  display: inline-flex;
+  align-items: baseline;
+}
+
+.pretty-expression-hit {
+  white-space: pre;
+  border-radius: 6px;
+}
+
+.pretty-expression-hit-selected {
+  background: rgba(37, 99, 235, 0.16);
+}
+
+.pretty-expression-token-operator {
+  padding: 0 0.06em;
+}
+
+.pretty-expression-token-function,
+.pretty-expression-token-identifier,
+.pretty-expression-token-number,
+.pretty-expression-token-paren,
+.pretty-expression-token-comma,
+.pretty-expression-token-abs {
+  white-space: pre;
+}
+
+.pretty-expression-caret-anchor {
+  width: 0;
+  overflow: visible;
+}
+
+.pretty-expression-caret {
+  display: inline-block;
+  width: 2px;
+  height: 1.1em;
+  margin: 0 -1px;
+  background: #2563eb;
+  border-radius: 999px;
+  animation: expression-caret-blink 1s steps(1, end) infinite;
+  vertical-align: text-bottom;
+}
+
+.pretty-expression-placeholder {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 0.55em;
+  min-height: 1.08em;
+  margin: 0 0.02em;
+  border-bottom: 1.5px solid currentColor;
+  opacity: 0.46;
+}
+
+.pretty-expression-power {
+  display: inline-flex;
+  align-items: flex-start;
+  min-width: 0;
+}
+
+.pretty-expression-power-base {
+  display: inline-flex;
+  align-items: baseline;
+}
+
+.pretty-expression-power-exponent {
+  display: inline-flex;
+  align-items: flex-start;
+  min-width: 0.38em;
+  font-size: 0.72em;
+  line-height: 1;
+  transform: translateY(-0.42em);
+  margin-left: 0.04em;
+}
+
+.pretty-expression-power-exponent .pretty-expression-placeholder {
+  min-width: 0.42em;
+  min-height: 0.76em;
+}
+
+.pretty-expression-fraction {
+  display: inline-grid;
+  grid-template-rows: auto 1px auto;
+  align-items: center;
+  justify-items: center;
+  min-width: 1.3em;
+  margin: 0 0.08em;
+  vertical-align: middle;
+}
+
+.pretty-expression-fraction-numerator,
+.pretty-expression-fraction-denominator {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 1em;
+  line-height: 1;
+}
+
+.pretty-expression-fraction-numerator {
+  font-size: 0.82em;
+  padding: 0 0.12em 0.05em;
+}
+
+.pretty-expression-fraction-denominator {
+  font-size: 0.82em;
+  padding: 0.05em 0.12em 0;
+}
+
+.pretty-expression-fraction-line {
+  width: 100%;
+  min-width: 1em;
+  border-top: 1.5px solid currentColor;
+}
+
+.pretty-expression-function-inverse {
+  display: inline-flex;
+  align-items: flex-start;
+  font-size: 0.68em;
+  line-height: 1;
+  transform: translateY(-0.42em);
+  margin-left: 0.03em;
+}
+
+.pretty-expression-log-base-subscript {
+  display: inline-flex;
+  align-items: flex-start;
+  font-size: 0.72em;
+  line-height: 1;
+  transform: translateY(0.34em);
+  margin: 0 0.06em 0 0.04em;
 }
 
 .expression-display {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
+  gap: 10px;
   width: 100%;
-  min-height: 26px;
+  min-height: 30px;
   padding: 0;
   border: none;
   background: transparent;
@@ -397,12 +637,26 @@ button {
   background: transparent;
 }
 
-.expression-display-formula {
-  width: 100%;
+.expression-display-pretty .pretty-expression {
+  font-size: 18px;
+  line-height: 1.3;
 }
 
-.expression-display-formula .katex {
-  font-size: 1.02em;
+.select-expression-math {
+  min-width: 0;
+  flex: 1 1 auto;
+  overflow: hidden;
+}
+
+.select-expression-math .pretty-expression {
+  flex-wrap: nowrap;
+  overflow: hidden;
+  white-space: nowrap;
+}
+
+.select-expression-math .pretty-expression,
+.select-expression-math .pretty-expression-compact {
+  font-size: 15px;
 }
 
 .expression-display-text {
@@ -410,8 +664,8 @@ button {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  font-size: 15px;
-  line-height: 1.4;
+  font-size: 18px;
+  line-height: 1.45;
   color: #0f172a;
 }
 
@@ -420,8 +674,8 @@ button {
 }
 
 .expression-action {
-  width: 36px;
-  height: 36px;
+  width: 40px;
+  height: 40px;
   border-radius: 12px;
   font-size: 16px;
 }
@@ -941,9 +1195,22 @@ button {
 }
 
 .expression-preview {
-  margin-top: 10px;
+  min-height: 20px;
   color: #334155;
   font-size: 14px;
+  overflow: hidden;
+}
+
+@keyframes expression-caret-blink {
+  0%,
+  49% {
+    opacity: 1;
+  }
+
+  50%,
+  100% {
+    opacity: 0;
+  }
 }
 
 .empty-state {
@@ -961,7 +1228,7 @@ button {
 
 @media (max-width: 1200px) {
   .app-grid {
-    grid-template-columns: 300px minmax(0, 1fr);
+    grid-template-columns: 340px minmax(0, 1fr);
   }
 
   .right-column {

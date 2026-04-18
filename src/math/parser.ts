@@ -201,6 +201,26 @@ const SUBSCRIPT_MAP: Record<string, string> = {
   ")": "\u208e",
 };
 
+const REVERSE_SUPERSCRIPT_MAP: Record<string, string> = Object.fromEntries(
+  Object.entries(SUPERSCRIPT_MAP).map(([plain, superscript]) => [superscript, plain]),
+);
+const REVERSE_SUBSCRIPT_MAP: Record<string, string> = Object.fromEntries(
+  Object.entries(SUBSCRIPT_MAP).map(([plain, subscript]) => [subscript, plain]),
+);
+const FRACTION_SLASH = "\u2044";
+const SUPERSCRIPT_PLACEHOLDER = "\u200a";
+const SUPERSCRIPT_CHARACTER_SET = Object.keys(REVERSE_SUPERSCRIPT_MAP).join("");
+const SUBSCRIPT_CHARACTER_SET = Object.keys(REVERSE_SUBSCRIPT_MAP).join("");
+
+function escapeForCharacterClass(value: string): string {
+  return value.replace(/[\\\-\]\[]/g, "\\$&");
+}
+
+const INPUT_FRACTION_PATTERN = new RegExp(
+  `([${escapeForCharacterClass(SUPERSCRIPT_CHARACTER_SET)}]+)${FRACTION_SLASH}([${escapeForCharacterClass(SUBSCRIPT_CHARACTER_SET)}]+)`,
+  "g",
+);
+
 export interface CompiledEvaluator {
   evaluate: (scope: Record<string, unknown>) => unknown;
 }
@@ -346,6 +366,84 @@ function toSubscript(value: string): string | null {
   return result;
 }
 
+function fromSuperscript(value: string): string | null {
+  if (!value) {
+    return null;
+  }
+
+  let result = "";
+  for (const character of value) {
+    const mapped = REVERSE_SUPERSCRIPT_MAP[character];
+    if (!mapped) {
+      return null;
+    }
+    result += mapped;
+  }
+
+  return result;
+}
+
+function fromSubscript(value: string): string | null {
+  if (!value) {
+    return null;
+  }
+
+  let result = "";
+  for (const character of value) {
+    const mapped = REVERSE_SUBSCRIPT_MAP[character];
+    if (!mapped) {
+      return null;
+    }
+    result += mapped;
+  }
+
+  return result;
+}
+
+function toSuperscriptToken(value: string): string | null {
+  const normalized = value.replace(/\s+/g, "");
+  if (!normalized) {
+    return null;
+  }
+
+  let result = "";
+  for (const character of normalized) {
+    const mapped = SUPERSCRIPT_MAP[character];
+    if (!mapped) {
+      return null;
+    }
+    result += mapped;
+  }
+
+  return result;
+}
+
+function formatSimpleInputFractions(value: string): string {
+  return value.replace(/\b(\d+)\s*\/\s*([a-z0-9]+)\b/gi, (match, numerator: string, denominator: string) => {
+    const superscript = toSuperscriptToken(numerator);
+    const subscript = toSubscript(denominator);
+
+    if (!superscript || !subscript) {
+      return match;
+    }
+
+    return `${superscript}${FRACTION_SLASH}${subscript}`;
+  });
+}
+
+function restoreSimpleInputFractions(value: string): string {
+  return value.replace(INPUT_FRACTION_PATTERN, (match, numerator: string, denominator: string) => {
+    const plainNumerator = fromSuperscript(numerator);
+    const plainDenominator = fromSubscript(denominator);
+
+    if (!plainNumerator || !plainDenominator) {
+      return match;
+    }
+
+    return `${plainNumerator}/${plainDenominator}`;
+  });
+}
+
 function isSymbolNode(node: RenderNode): node is SymbolRenderNode {
   return node.type === "SymbolNode";
 }
@@ -446,6 +544,10 @@ function renderSymbolText(name: string): string {
     return "\u03c0";
   }
 
+  if (name === "sqrt") {
+    return "\u221a";
+  }
+
   return name;
 }
 
@@ -454,12 +556,16 @@ function renderSymbolTex(name: string): string {
     return "\\pi";
   }
 
+  if (name === "sqrt") {
+    return "\\sqrt{}";
+  }
+
   return name;
 }
 
 function renderTextFunction(name: string, args: RenderNode[]): string {
   if (name === "sqrt") {
-    return args[0] ? `\u221a${wrapUnaryTextArgument(args[0])}` : "\u221a";
+    return args[0] ? `\u221a(${renderTextNode(args[0])})` : "\u221a()";
   }
 
   if (name === "abs") {
@@ -619,6 +725,18 @@ function renderTexNode(node: RenderNode): string {
 function formatLooseExpressionText(value: string): string {
   let display = value.trim();
 
+  if (/^sqrt\s*$/i.test(display)) {
+    return "\u221a";
+  }
+
+  if (/^sqrt\s*\(\s*$/i.test(display)) {
+    return "\u221a(";
+  }
+
+  if (/^sqrt\s*\(\s*\)$/i.test(display)) {
+    return "\u221a()";
+  }
+
   for (const [pattern, replacement] of NORMALIZATION_RULES) {
     display = display.replace(pattern, replacement);
   }
@@ -646,7 +764,6 @@ function formatLooseExpressionText(value: string): string {
   display = display.replace(/\bpi\b/gi, "\u03c0");
   display = display.replace(/\bsqrt\b/gi, "\u221a");
   display = display.replace(/\babs\s*\(/gi, "|");
-  display = display.replace(/√\(\s*$/u, "√");
   display = display.replace(/\(\s*\)/g, "");
   display = display.replace(/\^([+-]?\d+)/g, (_match, exponent: string) => toSuperscript(exponent));
   display = display.replace(/\s+/g, " ").trim();
@@ -657,6 +774,47 @@ function formatLooseExpressionText(value: string): string {
 export function formatExpressionText(expression: string): string {
   const parsed = parseRenderNode(expression);
   return parsed ? renderTextNode(parsed).trim() : formatLooseExpressionText(expression);
+}
+
+export function formatExpressionInputText(expression: string): string {
+  let display = expression;
+
+  for (const [pattern, replacement] of NORMALIZATION_RULES) {
+    display = display.replace(pattern, replacement);
+  }
+
+  for (const [name, label] of Object.entries(INVERSE_FUNCTION_TEXT_LABELS)) {
+    display = display.replace(new RegExp(`\\b${name}\\b`, "gi"), label);
+  }
+
+  display = display.replace(/\blog(?=\s*\()/gi, "lg");
+  display = display.replace(/\bpi\b/gi, "\u03c0");
+  display = display.replace(/\bsqrt\b/gi, "\u221a");
+  display = formatSimpleInputFractions(display);
+  display = display.replace(/\^(?=\s*(?:$|[+\-*/,)]))/g, SUPERSCRIPT_PLACEHOLDER);
+  display = display.replace(/\^([+-]?\d+)/g, (_match, exponent: string) => toSuperscript(exponent));
+
+  return display;
+}
+
+export function parseExpressionInputText(text: string): string {
+  let raw = text;
+
+  for (const [name, label] of Object.entries(INVERSE_FUNCTION_TEXT_LABELS)) {
+    raw = raw.replace(new RegExp(label, "gi"), name);
+  }
+
+  raw = raw.replace(/\blg\b/gi, "log");
+  raw = raw.replace(/\u03c0|\u03a0/g, "pi");
+  raw = raw.replace(/\u221a/g, "sqrt");
+  raw = restoreSimpleInputFractions(raw);
+  raw = raw.replace(new RegExp(SUPERSCRIPT_PLACEHOLDER, "g"), "^");
+  raw = raw.replace(/[\u2070\u00b9\u00b2\u00b3\u2074-\u2079\u207a\u207b]+/g, (superscriptRun) => {
+    const plain = fromSuperscript(superscriptRun);
+    return plain ? `^${plain}` : superscriptRun;
+  });
+
+  return raw;
 }
 
 export function expressionToTex(expression: string): string {
