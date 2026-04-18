@@ -1,5 +1,5 @@
 ﻿import { COLORS } from "../constants";
-import { buildIntervals, findRoots, midpointIntegral, sortAB, uniqueSorted } from "../math/numeric";
+import { buildIntervals, findRoots, findSingularityCandidates, midpointIntegral, sortAB, uniqueSorted } from "../math/numeric";
 import { expressionToTex, formatExpressionText } from "../math/parser";
 import type {
   CompiledExpression,
@@ -219,6 +219,12 @@ function buildBetweenFormulaSteps(segments: BetweenSegment[], area: number, sign
   return steps;
 }
 
+function buildBetweenGeneralFormula(expressionA: CompiledExpression, expressionB: CompiledExpression, a: number, b: number): string {
+  const texA = expressionToTex(expressionA.normalized);
+  const texB = expressionToTex(expressionB.normalized);
+  return `S = \\int_{${formatNumber(a, 3)}}^{${formatNumber(b, 3)}} \\left|${texA} - ${texB}\\right|\\,dx`;
+}
+
 interface UnderOverlaySnapshot {
   regions: GraphRegion[];
   roots: number[];
@@ -228,10 +234,33 @@ interface UnderOverlaySnapshot {
   points: GraphPoint[];
 }
 
+type ImproperReason = "none" | "boundary" | "interior" | "uncertain";
+
+interface ImproperIntegralPiece {
+  interval: [number, number];
+  value: number;
+  converges: boolean;
+  improper: boolean;
+  reason: ImproperReason;
+}
+
 interface ImproperIntegralEstimate {
   value: number;
   converges: boolean;
   improperAtBoundary: boolean;
+  improperInside: boolean;
+  uncertain: boolean;
+  reason: ImproperReason;
+  pieces: ImproperIntegralPiece[];
+}
+
+interface ImproperPieceSpec {
+  left: number;
+  right: number;
+  leftImproper: boolean;
+  rightImproper: boolean;
+  leftKind: "none" | "boundary" | "interior";
+  rightKind: "none" | "boundary" | "interior";
 }
 
 function isBoundarySingular(
@@ -258,10 +287,145 @@ function isBoundarySingular(
   });
 }
 
-function estimateBoundaryImproperIntegral(
+function improperPieceReason(piece: ImproperPieceSpec): ImproperReason {
+  if (piece.leftKind === "interior" || piece.rightKind === "interior") {
+    return "interior";
+  }
+  if (piece.leftKind === "boundary" || piece.rightKind === "boundary") {
+    return "boundary";
+  }
+  return "none";
+}
+
+function buildImproperPieceSpecs(
   fn: (x: number) => number,
   a: number,
   b: number,
+  interiorSingularities: number[],
+): ImproperPieceSpec[] {
+  const [left, right] = sortAB(a, b);
+  const width = right - left;
+
+  if (width <= 1e-6) {
+    return [];
+  }
+
+  const bounds = uniqueSorted(
+    [left, ...interiorSingularities.filter((value) => value > left && value < right), right],
+    Math.max(width / 4096, 1e-5),
+  );
+  const pieces: ImproperPieceSpec[] = [];
+
+  for (let index = 0; index < bounds.length - 1; index += 1) {
+    const pieceLeft = bounds[index];
+    const pieceRight = bounds[index + 1];
+    if (!(pieceRight - pieceLeft > 1e-6)) {
+      continue;
+    }
+
+    const leftKind = index > 0 ? "interior" : isBoundarySingular(fn, pieceLeft, pieceRight) ? "boundary" : "none";
+    const rightKind =
+      index < bounds.length - 2 ? "interior" : isBoundarySingular(fn, pieceRight, pieceLeft) ? "boundary" : "none";
+
+    pieces.push({
+      left: pieceLeft,
+      right: pieceRight,
+      leftImproper: leftKind !== "none",
+      rightImproper: rightKind !== "none",
+      leftKind,
+      rightKind,
+    });
+  }
+
+  return pieces;
+}
+
+function truncatedSequenceConverges(values: number[]): boolean {
+  if (values.length < 4) {
+    return false;
+  }
+
+  const tailValues = values.slice(-4);
+  const deltas = tailValues.slice(1).map((value, index) => Math.abs(value - tailValues[index]));
+  if (!deltas.length) {
+    return false;
+  }
+
+  const scale = Math.max(1, ...tailValues.map((value) => Math.abs(value)));
+  return Math.max(...deltas) < Math.max(0.02, scale * 0.01);
+}
+
+function estimateImproperPiece(
+  fn: (x: number) => number,
+  piece: ImproperPieceSpec,
+): ImproperIntegralPiece {
+  const width = piece.right - piece.left;
+  const improper = piece.leftImproper || piece.rightImproper;
+  const reason = improperPieceReason(piece);
+
+  if (width <= 1e-6) {
+    return {
+      interval: [piece.left, piece.right],
+      value: 0,
+      converges: true,
+      improper,
+      reason,
+    };
+  }
+
+  if (!improper) {
+    const value = midpointIntegral(fn, piece.left, piece.right);
+    return {
+      interval: [piece.left, piece.right],
+      value,
+      converges: Number.isFinite(value),
+      improper: false,
+      reason: Number.isFinite(value) ? "none" : "uncertain",
+    };
+  }
+
+  const truncatedValues: number[] = [];
+  const startPower = 6;
+  const levels = 12;
+
+  for (let level = 0; level < levels; level += 1) {
+    const epsilon = Math.max(width / 2 ** (startPower + level), 1e-7);
+    const start = piece.left + (piece.leftImproper ? epsilon : 0);
+    const end = piece.right - (piece.rightImproper ? epsilon : 0);
+
+    if (!(end > start)) {
+      break;
+    }
+
+    const value = midpointIntegral(fn, start, end, 2400);
+    if (!Number.isFinite(value)) {
+      return {
+        interval: [piece.left, piece.right],
+        value: Number.NaN,
+        converges: false,
+        improper,
+        reason,
+      };
+    }
+
+    truncatedValues.push(value);
+  }
+
+  const converges = truncatedSequenceConverges(truncatedValues);
+  return {
+    interval: [piece.left, piece.right],
+    value: converges && truncatedValues.length ? truncatedValues[truncatedValues.length - 1] : Number.NaN,
+    converges,
+    improper,
+    reason,
+  };
+}
+
+function estimatePiecewiseImproperIntegral(
+  fn: (x: number) => number,
+  a: number,
+  b: number,
+  interiorSingularities: number[],
 ): ImproperIntegralEstimate {
   const [left, right] = sortAB(a, b);
   const width = right - left;
@@ -271,63 +435,41 @@ function estimateBoundaryImproperIntegral(
       value: 0,
       converges: true,
       improperAtBoundary: false,
+      improperInside: false,
+      uncertain: false,
+      reason: "none",
+      pieces: [],
     };
   }
 
-  const leftSingular = isBoundarySingular(fn, left, right);
-  const rightSingular = isBoundarySingular(fn, right, left);
+  const pieces = buildImproperPieceSpecs(fn, left, right, interiorSingularities).map((piece) =>
+    estimateImproperPiece(fn, piece),
+  );
 
-  if (!leftSingular && !rightSingular) {
-    const value = midpointIntegral(fn, a, b);
-    return {
-      value,
-      converges: Number.isFinite(value),
-      improperAtBoundary: false,
-    };
-  }
-
-  const truncatedValues: number[] = [];
-  const startPower = 5;
-  const levels = 12;
-
-  for (let level = 0; level < levels; level += 1) {
-    const epsilonLeft = leftSingular ? width / 2 ** (startPower + level) : 0;
-    const epsilonRight = rightSingular ? width / 2 ** (startPower + level) : 0;
-    const start = left + epsilonLeft;
-    const end = right - epsilonRight;
-
-    if (!(end > start)) {
-      break;
-    }
-
-    const value = midpointIntegral(fn, start, end, 2400);
-    if (!Number.isFinite(value)) {
-      return {
-        value: Number.NaN,
-        converges: false,
-        improperAtBoundary: true,
-      };
-    }
-
-    truncatedValues.push(value);
-  }
-
-  if (truncatedValues.length < 4) {
-    return {
-      value: Number.NaN,
-      converges: false,
-      improperAtBoundary: true,
-    };
-  }
-
-  const deltas = truncatedValues.slice(1).map((value, index) => Math.abs(value - truncatedValues[index]));
-  const tailWindow = deltas.slice(-4);
-  const converges = tailWindow.length > 0 && Math.max(...tailWindow) < 0.02;
+  const converges = pieces.length > 0 && pieces.every((piece) => piece.converges);
+  const improperAtBoundary = pieces.some((piece) => piece.reason === "boundary");
+  const improperInside = pieces.some((piece) => piece.reason === "interior");
+  const uncertain = pieces.some((piece) => piece.reason === "uncertain");
+  const reason: ImproperReason = !converges
+    ? improperInside
+      ? "interior"
+      : improperAtBoundary
+        ? "boundary"
+        : "uncertain"
+    : improperInside
+      ? "interior"
+      : improperAtBoundary
+        ? "boundary"
+        : "none";
 
   return {
-    value: truncatedValues[truncatedValues.length - 1],
+    value: converges ? pieces.reduce((sum, piece) => sum + piece.value, 0) : Number.NaN,
     converges,
-    improperAtBoundary: true,
+    improperAtBoundary,
+    improperInside,
+    uncertain,
+    reason,
+    pieces,
   };
 }
 
@@ -339,9 +481,47 @@ function integralEstimateTex(estimate: ImproperIntegralEstimate, digits = 5): st
   return estimate.converges ? formatNumber(estimate.value, digits) : "\\text{расходится}";
 }
 
+function estimateIsFinite(estimate: ImproperIntegralEstimate): boolean {
+  return estimate.converges && Number.isFinite(estimate.value);
+}
+
+function buildImproperFailureExplanation(estimate: ImproperIntegralEstimate): string[] {
+  if (estimate.improperInside) {
+    return [
+      "На отрезке есть внутренняя точка разрыва, поэтому интеграл приходится рассматривать по кускам.",
+      "Хотя бы один усечённый кусок не стабилизируется, поэтому результат помечается как расходящийся.",
+    ];
+  }
+
+  if (estimate.improperAtBoundary) {
+    return [
+      "На границе интервала есть несобственная особенность, и усечённые значения не стабилизируются.",
+      "Поэтому результат помечается как расходящийся.",
+    ];
+  }
+
+  return [
+    "Численная проверка не дала устойчивой сходимости на выбранном интервале.",
+    "Поэтому безопасный итог помечается как расходящийся.",
+  ];
+}
+
+function buildImproperConvergentExplanation(estimate: ImproperIntegralEstimate): string[] {
+  if (estimate.improperInside) {
+    return ["На отрезке есть точка разрыва, но усечённые интегралы по обе стороны стабилизируются."];
+  }
+
+  if (estimate.improperAtBoundary) {
+    return ["На границе есть несобственная особенность, но усечённые интегралы стабилизируются, поэтому интеграл сходится."];
+  }
+
+  return [];
+}
+
 function buildUnderSnapshot(fn: (x: number) => number, a: number, b: number): UnderOverlaySnapshot {
   const roots = findRoots(fn, a, b);
-  const breaks = findDiscontinuityBreaks(fn, a, b);
+  const singularities = findSingularityCandidates(fn, a, b);
+  const breaks = uniqueSorted([...findDiscontinuityBreaks(fn, a, b), ...singularities]);
   const intervals = buildIntervals(a, b, uniqueSorted([...roots, ...breaks]));
   const regions: GraphRegion[] = [];
 
@@ -365,8 +545,8 @@ function buildUnderSnapshot(fn: (x: number) => number, a: number, b: number): Un
     });
   }
 
-  const signedIntegral = estimateBoundaryImproperIntegral(fn, a, b);
-  const geometricArea = estimateBoundaryImproperIntegral((x) => Math.abs(fn(x)), a, b);
+  const signedIntegral = estimatePiecewiseImproperIntegral(fn, a, b, singularities);
+  const geometricArea = estimatePiecewiseImproperIntegral((x) => Math.abs(fn(x)), a, b, singularities);
   const points = roots
     .map((x) => ({ x, y: 0, color: COLORS.violet, label: `x=${formatNumber(x, 3)}` }))
     .filter((point) => point.x >= a && point.x <= b);
@@ -418,21 +598,31 @@ export function buildOverlay(
       }
       const snapshot = buildUnderSnapshot(fnA, a, b);
       const texA = expressionA ? expressionToTex(expressionA.normalized) : "f(x)";
-      const hasFiniteValues = snapshot.signedIntegral.converges || snapshot.geometricArea.converges;
-      const divergenceExplanation =
-        !snapshot.signedIntegral.converges || !snapshot.geometricArea.converges
+      const underFinite = estimateIsFinite(snapshot.signedIntegral) && estimateIsFinite(snapshot.geometricArea);
+      const divergenceExplanation = underFinite
+        ? [
+            ...buildImproperConvergentExplanation(snapshot.signedIntegral),
+            ...(!snapshot.geometricArea.improperAtBoundary && !snapshot.geometricArea.improperInside
+              ? []
+              : buildImproperConvergentExplanation(snapshot.geometricArea)),
+          ]
+        : snapshot.geometricArea.improperInside || snapshot.signedIntegral.improperInside
           ? [
-              "\u0423 \u0433\u0440\u0430\u043d\u0438\u0446\u044b \u0435\u0441\u0442\u044c \u043d\u0435\u0441\u043e\u0431\u0441\u0442\u0432\u0435\u043d\u043d\u0430\u044f \u043e\u0441\u043e\u0431\u0435\u043d\u043d\u043e\u0441\u0442\u044c, \u0438 \u0443\u0441\u0435\u0447\u0451\u043d\u043d\u044b\u0435 \u0438\u043d\u0442\u0435\u0433\u0440\u0430\u043b\u044b \u043d\u0435 \u0441\u0442\u0430\u0431\u0438\u043b\u0438\u0437\u0438\u0440\u0443\u044e\u0442\u0441\u044f.",
-              "\u041f\u043e\u044d\u0442\u043e\u043c\u0443 \u0438 \u043f\u043e\u0434\u043f\u0438\u0441\u0430\u043d\u043d\u044b\u0439 \u0438\u043d\u0442\u0435\u0433\u0440\u0430\u043b, \u0438 \u0433\u0435\u043e\u043c\u0435\u0442\u0440\u0438\u0447\u0435\u0441\u043a\u0430\u044f \u043f\u043b\u043e\u0449\u0430\u0434\u044c \u043f\u043e\u043c\u0435\u0447\u0430\u044e\u0442\u0441\u044f \u043a\u0430\u043a \u0440\u0430\u0441\u0445\u043e\u0434\u044f\u0449\u0438\u0435\u0441\u044f.",
+              "На отрезке есть внутренняя точка разрыва, поэтому интеграл и площадь приходится рассматривать по кускам.",
+              "Хотя бы один кусок не даёт устойчивой сходимости, поэтому итог помечается как расходящийся.",
             ]
-          : snapshot.signedIntegral.improperAtBoundary || snapshot.geometricArea.improperAtBoundary
+          : snapshot.geometricArea.improperAtBoundary || snapshot.signedIntegral.improperAtBoundary
             ? [
-                "\u041d\u0430 \u0433\u0440\u0430\u043d\u0438\u0446\u0435 \u0435\u0441\u0442\u044c \u043d\u0435\u0441\u043e\u0431\u0441\u0442\u0432\u0435\u043d\u043d\u0430\u044f \u043e\u0441\u043e\u0431\u0435\u043d\u043d\u043e\u0441\u0442\u044c, \u043d\u043e \u0443\u0441\u0435\u0447\u0451\u043d\u043d\u044b\u0435 \u0438\u043d\u0442\u0435\u0433\u0440\u0430\u043b\u044b \u0441\u0442\u0430\u0431\u0438\u043b\u0438\u0437\u0438\u0440\u0443\u044e\u0442\u0441\u044f, \u043f\u043e\u044d\u0442\u043e\u043c\u0443 \u043d\u0435\u0441\u043e\u0431\u0441\u0442\u0432\u0435\u043d\u043d\u044b\u0439 \u0438\u043d\u0442\u0435\u0433\u0440\u0430\u043b \u0441\u0445\u043e\u0434\u0438\u0442\u0441\u044f.",
+                "На границе интервала есть несобственная особенность, и усечённые значения не стабилизируются.",
+                "Поэтому и подписанный интеграл, и геометрическая площадь помечаются как расходящиеся.",
               ]
-            : [];
+            : [
+                "Численная проверка не дала устойчивой сходимости на выбранном интервале.",
+                "Поэтому безопасный итог помечается как расходящийся.",
+              ];
 
       return {
-        regions: snapshot.regions,
+        regions: underFinite ? snapshot.regions : [],
         polygons: [],
         polylines: [],
         points: snapshot.points,
@@ -441,24 +631,25 @@ export function buildOverlay(
           [
             {
               label: "\u041f\u043e\u0434\u043f\u0438\u0441\u0430\u043d\u043d\u044b\u0439 \u0438\u043d\u0442\u0435\u0433\u0440\u0430\u043b",
-              value: formatIntegralEstimate(snapshot.signedIntegral),
+              value: underFinite ? formatIntegralEstimate(snapshot.signedIntegral) : "расходится",
               tone: "blue",
             },
             {
               label: "\u0413\u0435\u043e\u043c\u0435\u0442\u0440\u0438\u0447\u0435\u0441\u043a\u0430\u044f \u043f\u043b\u043e\u0449\u0430\u0434\u044c",
-              value: formatIntegralEstimate(snapshot.geometricArea),
+              value: underFinite ? formatIntegralEstimate(snapshot.geometricArea) : "расходится",
               tone: "emerald",
             },
             { label: "\u0418\u043d\u0442\u0435\u0440\u0432\u0430\u043b", value: `[${formatNumber(a, 3)}; ${formatNumber(b, 3)}]`, tone: "slate" },
             { label: "\u041a\u043e\u0440\u043d\u0438", value: String(snapshot.points.length), tone: "violet" },
           ],
           "\u041d\u0430 \u0432\u044b\u0431\u0440\u0430\u043d\u043d\u043e\u043c \u0438\u043d\u0442\u0435\u0440\u0432\u0430\u043b\u0435 \u043d\u0435\u0442 \u043a\u043e\u043d\u0435\u0447\u043d\u044b\u0445 \u0437\u043d\u0430\u0447\u0435\u043d\u0438\u0439.",
-          !snapshot.regions.length && !hasFiniteValues,
+          !underFinite,
         ),
         formulaTex: "\\int_a^b f(x)\\,dx\\quad\\text{\u0438}\\quad\\int_a^b |f(x)|\\,dx",
         formulaSteps: [
-          `\\int_{${formatNumber(a, 3)}}^{${formatNumber(b, 3)}} ${texA}\\,dx = ${integralEstimateTex(snapshot.signedIntegral)}`,
-          `S_{\\text{geom}} = \\int_{${formatNumber(a, 3)}}^{${formatNumber(b, 3)}} \\left|${texA}\\right|\\,dx = ${integralEstimateTex(snapshot.geometricArea)}`,
+          `\\int_{${formatNumber(a, 3)}}^{${formatNumber(b, 3)}} ${texA}\\,dx`,
+          `\\int_{${formatNumber(a, 3)}}^{${formatNumber(b, 3)}} ${texA}\\,dx = ${underFinite ? integralEstimateTex(snapshot.signedIntegral) : "\\text{расходится}"}`,
+          `S_{\\text{geom}} = \\int_{${formatNumber(a, 3)}}^{${formatNumber(b, 3)}} \\left|${texA}\\right|\\,dx = ${underFinite ? integralEstimateTex(snapshot.geometricArea) : "\\text{расходится}"}`,
         ],
         explanation: [
           "\u041f\u043e\u0434\u043f\u0438\u0441\u0430\u043d\u043d\u044b\u0439 \u0438\u043d\u0442\u0435\u0433\u0440\u0430\u043b \u0443\u0447\u0438\u0442\u044b\u0432\u0430\u0435\u0442, \u043b\u0435\u0436\u0438\u0442 \u043b\u0438 \u0433\u0440\u0430\u0444\u0438\u043a \u0432\u044b\u0448\u0435 \u0438\u043b\u0438 \u043d\u0438\u0436\u0435 \u043e\u0441\u0438 Ox.",
@@ -481,10 +672,16 @@ export function buildOverlay(
 
       const diff = (x: number) => fnA(x) - fnB(x);
       const roots = findRoots(diff, a, b);
+      const singularities = uniqueSorted([
+        ...findSingularityCandidates(fnA, a, b),
+        ...findSingularityCandidates(fnB, a, b),
+        ...findSingularityCandidates(diff, a, b),
+      ]);
       const breaks = uniqueSorted([
         ...findDiscontinuityBreaks(fnA, a, b),
         ...findDiscontinuityBreaks(fnB, a, b),
         ...findDiscontinuityBreaks(diff, a, b),
+        ...singularities,
       ]);
       const intervals = buildIntervals(a, b, uniqueSorted([...roots, ...breaks]));
       const regions: GraphRegion[] = [];
@@ -529,15 +726,10 @@ export function buildOverlay(
         })
         .filter((point): point is NonNullable<typeof point> => point !== null);
       const mergedSegments = mergeBetweenSegments(segments);
-      const area = mergedSegments.reduce((sum, segment) => {
-        const contribution = midpointIntegral((x) => {
-          const top = segment.topFn(x);
-          const bottom = segment.bottomFn(x);
-          return Number.isFinite(top) && Number.isFinite(bottom) ? top - bottom : Number.NaN;
-        }, segment.left, segment.right);
-        return Number.isFinite(contribution) ? sum + contribution : sum;
-      }, 0);
-      const signedDifference = midpointIntegral(diff, a, b);
+      const areaEstimate = estimatePiecewiseImproperIntegral((x) => Math.abs(diff(x)), a, b, singularities);
+      const signedDifferenceEstimate = estimatePiecewiseImproperIntegral(diff, a, b, singularities);
+      const areaFinite = estimateIsFinite(areaEstimate);
+      const signedDifferenceFinite = estimateIsFinite(signedDifferenceEstimate);
       const orderingMetrics = mergedSegments.map((segment, index) => ({
         label:
           mergedSegments.length === 1
@@ -546,6 +738,39 @@ export function buildOverlay(
         value: expressionDisplayLabel(segment.topExpression),
         tone: index % 2 === 0 ? ("blue" as const) : ("violet" as const),
       }));
+      const baseExplanation = [
+        "\u041d\u0430 \u043a\u0430\u0436\u0434\u043e\u043c \u0443\u0447\u0430\u0441\u0442\u043a\u0435 \u043f\u043b\u043e\u0449\u0430\u0434\u044c \u0441\u0447\u0438\u0442\u0430\u0435\u0442\u0441\u044f \u043a\u0430\u043a \u201c\u0432\u0435\u0440\u0445\u043d\u044f\u044f \u0444\u0443\u043d\u043a\u0446\u0438\u044f \u043c\u0438\u043d\u0443\u0441 \u043d\u0438\u0436\u043d\u044f\u044f\u201d.",
+        "\u0418\u043d\u0442\u0435\u0440\u0432\u0430\u043b \u0434\u0435\u043b\u0438\u0442\u0441\u044f \u043f\u043e \u0442\u043e\u0447\u043a\u0430\u043c \u043f\u0435\u0440\u0435\u0441\u0435\u0447\u0435\u043d\u0438\u044f \u0438 \u0442\u043e\u0447\u043a\u0430\u043c \u0440\u0430\u0437\u0440\u044b\u0432\u0430, \u0447\u0442\u043e\u0431\u044b \u043a\u0430\u0436\u0434\u044b\u0439 \u043a\u0443\u0441\u043e\u043a \u0430\u043d\u0430\u043b\u0438\u0437\u0438\u0440\u043e\u0432\u0430\u043b\u0441\u044f \u043e\u0442\u0434\u0435\u043b\u044c\u043d\u043e.",
+      ];
+
+      if (!areaFinite) {
+        return {
+          regions: [],
+          polygons: [],
+          polylines: [],
+          points: intersections,
+          verticals: buildVerticals(a, b),
+          metrics: [
+            { label: "\u041f\u043b\u043e\u0449\u0430\u0434\u044c", value: "расходится", tone: "emerald" },
+            {
+              label: "\u041f\u043e\u0434\u043f\u0438\u0441\u0430\u043d\u043d\u0430\u044f \u0440\u0430\u0437\u043d\u043e\u0441\u0442\u044c",
+              value: signedDifferenceFinite ? formatIntegralEstimate(signedDifferenceEstimate) : "расходится",
+              tone: "blue",
+            },
+            { label: "\u0418\u043d\u0442\u0435\u0440\u0432\u0430\u043b", value: `[${formatNumber(a, 3)}; ${formatNumber(b, 3)}]`, tone: "slate" },
+            { label: "\u041f\u0435\u0440\u0435\u0441\u0435\u0447\u0435\u043d\u0438\u044f", value: String(intersections.length), tone: "violet" },
+            statusMetric("\u041d\u0430 \u0432\u044b\u0431\u0440\u0430\u043d\u043d\u043e\u043c \u0438\u043d\u0442\u0435\u0440\u0432\u0430\u043b\u0435 \u043d\u0435\u0442 \u043a\u043e\u043d\u0435\u0447\u043d\u043e\u0439 \u043f\u043b\u043e\u0449\u0430\u0434\u0438 \u043c\u0435\u0436\u0434\u0443 \u0433\u0440\u0430\u0444\u0438\u043a\u0430\u043c\u0438."),
+          ],
+          formulaTex: buildBetweenGeneralFormula(expressionANonNull, expressionBNonNull, a, b),
+          formulaSteps: [
+            buildBetweenGeneralFormula(expressionANonNull, expressionBNonNull, a, b),
+            "\\text{Разбиение выполняется по точкам пересечения и точкам разрыва функций}",
+            "S = \\text{расходится}",
+          ],
+          explanation: [...baseExplanation, ...buildImproperFailureExplanation(areaEstimate)],
+          volumePreview: null,
+        };
+      }
 
       return {
         regions,
@@ -555,10 +780,10 @@ export function buildOverlay(
         verticals: buildVerticals(a, b),
         metrics: withOptionalStatus(
           [
-            { label: "\u041f\u043b\u043e\u0449\u0430\u0434\u044c", value: formatNumber(area), tone: "emerald" },
+            { label: "\u041f\u043b\u043e\u0449\u0430\u0434\u044c", value: formatIntegralEstimate(areaEstimate), tone: "emerald" },
             {
               label: "\u041f\u043e\u0434\u043f\u0438\u0441\u0430\u043d\u043d\u0430\u044f \u0440\u0430\u0437\u043d\u043e\u0441\u0442\u044c",
-              value: formatNumber(signedDifference),
+              value: formatIntegralEstimate(signedDifferenceEstimate),
               tone: "blue",
             },
             { label: "\u0418\u043d\u0442\u0435\u0440\u0432\u0430\u043b", value: `[${formatNumber(a, 3)}; ${formatNumber(b, 3)}]`, tone: "slate" },
@@ -566,14 +791,11 @@ export function buildOverlay(
             ...orderingMetrics,
           ],
           "\u041d\u0430 \u0432\u044b\u0431\u0440\u0430\u043d\u043d\u043e\u043c \u0438\u043d\u0442\u0435\u0440\u0432\u0430\u043b\u0435 \u043d\u0435\u0442 \u043a\u043e\u043d\u0435\u0447\u043d\u043e\u0439 \u043e\u0431\u043b\u0430\u0441\u0442\u0438 \u043c\u0435\u0436\u0434\u0443 \u0433\u0440\u0430\u0444\u0438\u043a\u0430\u043c\u0438.",
-          !regions.length && !Number.isFinite(area),
+          !regions.length && !areaFinite,
         ),
         formulaTex: buildBetweenFormulaTex(mergedSegments),
-        formulaSteps: buildBetweenFormulaSteps(mergedSegments, area, signedDifference),
-        explanation: [
-          "\u041d\u0430 \u043a\u0430\u0436\u0434\u043e\u043c \u0443\u0447\u0430\u0441\u0442\u043a\u0435 \u043f\u043b\u043e\u0449\u0430\u0434\u044c \u0441\u0447\u0438\u0442\u0430\u0435\u0442\u0441\u044f \u043a\u0430\u043a \u201c\u0432\u0435\u0440\u0445\u043d\u044f\u044f \u0444\u0443\u043d\u043a\u0446\u0438\u044f \u043c\u0438\u043d\u0443\u0441 \u043d\u0438\u0436\u043d\u044f\u044f\u201d.",
-          "\u0415\u0441\u043b\u0438 \u0433\u0440\u0430\u0444\u0438\u043a\u0438 \u043c\u0435\u043d\u044f\u044e\u0442\u0441\u044f \u043c\u0435\u0441\u0442\u0430\u043c\u0438, \u0438\u043d\u0442\u0435\u0440\u0432\u0430\u043b \u043d\u0443\u0436\u043d\u043e \u0434\u0435\u043b\u0438\u0442\u044c \u043f\u043e \u0442\u043e\u0447\u043a\u0430\u043c \u043f\u0435\u0440\u0435\u0441\u0435\u0447\u0435\u043d\u0438\u044f.",
-        ],
+        formulaSteps: buildBetweenFormulaSteps(mergedSegments, areaEstimate.value, signedDifferenceEstimate.value),
+        explanation: [...baseExplanation, ...buildImproperConvergentExplanation(areaEstimate)],
         volumePreview: null,
       };
     }
@@ -583,6 +805,10 @@ export function buildOverlay(
         return emptyOverlay("\u0412\u044b\u0431\u0435\u0440\u0438\u0442\u0435 \u043a\u043e\u0440\u0440\u0435\u043a\u0442\u043d\u0443\u044e \u0444\u0443\u043d\u043a\u0446\u0438\u044e \u0434\u043b\u044f \u0441\u0443\u043c\u043c \u0420\u0438\u043c\u0430\u043d\u0430.");
       }
 
+      const snapshot = buildUnderSnapshot(fnA, a, b);
+      const integral = snapshot.signedIntegral;
+      const integralFinite = estimateIsFinite(integral);
+      const texA = expressionA ? expressionToTex(expressionA.normalized) : "f(x)";
       const width = (b - a) / tool.n;
       const polygons: GraphPolygon[] = [];
       const points: GraphPoint[] = [];
@@ -609,7 +835,69 @@ export function buildOverlay(
         used += 1;
       }
 
-      const exact = midpointIntegral(fnA, a, b);
+      const approximationReliable = integralFinite && used === tool.n;
+
+      if (!integralFinite) {
+        return {
+          regions: [],
+          polygons: [],
+          polylines: [],
+          points: [],
+          verticals: buildVerticals(a, b),
+          metrics: [
+            { label: "\u0421\u0443\u043c\u043c\u0430 \u0420\u0438\u043c\u0430\u043d\u0430", value: "расходится", tone: "blue" },
+            { label: "\u0418\u043d\u0442\u0435\u0433\u0440\u0430\u043b", value: "расходится", tone: "emerald" },
+            { label: "\u0410\u0431\u0441. \u043e\u0448\u0438\u0431\u043a\u0430", value: "\u043d\u0435\u0434\u043e\u0441\u0442\u0443\u043f\u043d\u043e", tone: "rose" },
+            { label: "n", value: String(tool.n), tone: "slate" },
+            { label: "\u0412\u044b\u0431\u043e\u0440\u043a\u0430", value: tool.sample, tone: "violet" },
+            { label: "\u0421\u0442\u0430\u0442\u0443\u0441", value: "\u041d\u0430 \u0438\u043d\u0442\u0435\u0440\u0432\u0430\u043b\u0435 \u043d\u0435\u0442 \u043a\u043e\u0440\u0440\u0435\u043a\u0442\u043d\u043e\u0433\u043e \u043a\u043e\u043d\u0435\u0447\u043d\u043e\u0433\u043e \u0438\u043d\u0442\u0435\u0433\u0440\u0430\u043b\u0430.", tone: "slate" },
+          ],
+          formulaTex: "S_n = \\sum_{i=1}^{n} f(\\xi_i)\\,\\Delta x",
+          formulaSteps: [
+            "S_n = \\sum_{i=1}^{n} f(\\xi_i)\\,\\Delta x",
+            `\\int_{${formatNumber(a, 3)}}^{${formatNumber(b, 3)}} ${texA}\\,dx = \\text{расходится}`,
+            "S_n \\text{ не даёт корректного конечного результата на этом интервале}",
+          ],
+          explanation: [
+            "\u0421\u0443\u043c\u043c\u0430 \u0420\u0438\u043c\u0430\u043d\u0430 \u0438\u043c\u0435\u0435\u0442 \u0441\u043c\u044b\u0441\u043b \u043a\u0430\u043a \u043f\u0440\u0438\u0431\u043b\u0438\u0436\u0435\u043d\u0438\u0435 \u0441\u0443\u0449\u0435\u0441\u0442\u0432\u0443\u044e\u0449\u0435\u0433\u043e \u043a\u043e\u043d\u0435\u0447\u043d\u043e\u0433\u043e \u0438\u043d\u0442\u0435\u0433\u0440\u0430\u043b\u0430.",
+            ...buildImproperFailureExplanation(integral),
+          ],
+          volumePreview: null,
+        };
+      }
+
+      if (!approximationReliable) {
+        return {
+          regions: [],
+          polygons: [],
+          polylines: [],
+          points: [],
+          verticals: buildVerticals(a, b),
+          metrics: [
+            { label: "\u0421\u0443\u043c\u043c\u0430 \u0420\u0438\u043c\u0430\u043d\u0430", value: "\u043d\u0435\u0434\u043e\u0441\u0442\u0443\u043f\u043d\u043e", tone: "blue" },
+            { label: "\u0418\u043d\u0442\u0435\u0433\u0440\u0430\u043b", value: formatNumber(integral.value), tone: "emerald" },
+            { label: "\u0410\u0431\u0441. \u043e\u0448\u0438\u0431\u043a\u0430", value: "\u043d\u0435\u0434\u043e\u0441\u0442\u0443\u043f\u043d\u043e", tone: "rose" },
+            { label: "n", value: String(tool.n), tone: "slate" },
+            { label: "\u0412\u044b\u0431\u043e\u0440\u043a\u0430", value: tool.sample, tone: "violet" },
+            {
+              label: "\u0421\u0442\u0430\u0442\u0443\u0441",
+              value: "\u0422\u0435\u043a\u0443\u0449\u0435\u0435 \u0440\u0430\u0437\u0431\u0438\u0435\u043d\u0438\u0435 \u043f\u043e\u043f\u0430\u0434\u0430\u0435\u0442 \u0432 \u043e\u0441\u043e\u0431\u0435\u043d\u043d\u043e\u0441\u0442\u044c, \u043f\u043e\u044d\u0442\u043e\u043c\u0443 \u0441\u0443\u043c\u043c\u0430 \u0420\u0438\u043c\u0430\u043d\u0430 \u0434\u043b\u044f \u044d\u0442\u043e\u0433\u043e \u0448\u0430\u0433\u0430 \u043d\u0435 \u0441\u0442\u0440\u043e\u0438\u0442\u0441\u044f.",
+              tone: "slate",
+            },
+          ],
+          formulaTex: "S_n = \\sum_{i=1}^{n} f(\\xi_i)\\,\\Delta x",
+          formulaSteps: [
+            "S_n = \\sum_{i=1}^{n} f(\\xi_i)\\,\\Delta x",
+            `\\int_{${formatNumber(a, 3)}}^{${formatNumber(b, 3)}} ${texA}\\,dx = ${formatNumber(integral.value)}`,
+            "S_n = \\text{недоступно для выбранного разбиения}",
+          ],
+          explanation: [
+            "\u0418\u043d\u0442\u0435\u0433\u0440\u0430\u043b \u043d\u0430 \u043e\u0442\u0440\u0435\u0437\u043a\u0435 \u0441\u0443\u0449\u0435\u0441\u0442\u0432\u0443\u0435\u0442, \u043d\u043e \u0432\u044b\u0431\u0440\u0430\u043d\u043d\u043e\u0435 \u0440\u0430\u0437\u0431\u0438\u0435\u043d\u0438\u0435 \u0438\u043b\u0438 \u0442\u043e\u0447\u043a\u0438 \u0432\u044b\u0431\u043e\u0440\u043a\u0438 \u043f\u043e\u043f\u0430\u0434\u0430\u044e\u0442 \u0432 \u043e\u0441\u043e\u0431\u0435\u043d\u043d\u043e\u0441\u0442\u044c.",
+            ...buildImproperConvergentExplanation(integral),
+          ],
+          volumePreview: null,
+        };
+      }
 
       return {
         regions: [],
@@ -620,8 +908,8 @@ export function buildOverlay(
         metrics: withOptionalStatus(
           [
             { label: "\u0421\u0443\u043c\u043c\u0430 \u0420\u0438\u043c\u0430\u043d\u0430", value: formatNumber(approx), tone: "blue" },
-            { label: "\u0418\u043d\u0442\u0435\u0433\u0440\u0430\u043b", value: formatNumber(exact), tone: "emerald" },
-            { label: "\u0410\u0431\u0441. \u043e\u0448\u0438\u0431\u043a\u0430", value: formatNumber(Math.abs(approx - exact)), tone: "rose" },
+            { label: "\u0418\u043d\u0442\u0435\u0433\u0440\u0430\u043b", value: formatNumber(integral.value), tone: "emerald" },
+            { label: "\u0410\u0431\u0441. \u043e\u0448\u0438\u0431\u043a\u0430", value: formatNumber(Math.abs(approx - integral.value)), tone: "rose" },
             { label: "n", value: String(tool.n), tone: "slate" },
             { label: "\u0412\u044b\u0431\u043e\u0440\u043a\u0430", value: tool.sample, tone: "violet" },
             { label: "\u041f\u0440\u044f\u043c\u043e\u0443\u0433\u043e\u043b\u044c\u043d\u0438\u043a\u043e\u0432", value: String(used), tone: "amber" },
@@ -633,7 +921,7 @@ export function buildOverlay(
         formulaSteps: [
           "S_n = \\sum_{i=1}^{n} f(\\xi_i)\\,\\Delta x",
           `S_n \\approx ${formatNumber(approx)}`,
-          `\\left|S_n - I\\right| = ${formatNumber(Math.abs(approx - exact))}`,
+          `\\left|S_n - I\\right| = ${formatNumber(Math.abs(approx - integral.value))}`,
         ],
         explanation: [
           "\u0421\u0443\u043c\u043c\u0430 \u0420\u0438\u043c\u0430\u043d\u0430 \u0434\u0430\u0451\u0442 \u043f\u0440\u0438\u0431\u043b\u0438\u0436\u0435\u043d\u0438\u0435 \u0438\u043d\u0442\u0435\u0433\u0440\u0430\u043b\u0430 \u0447\u0435\u0440\u0435\u0437 \u043f\u0440\u044f\u043c\u043e\u0443\u0433\u043e\u043b\u044c\u043d\u0438\u043a\u0438.",
@@ -648,6 +936,10 @@ export function buildOverlay(
         return emptyOverlay("\u0412\u044b\u0431\u0435\u0440\u0438\u0442\u0435 \u043a\u043e\u0440\u0440\u0435\u043a\u0442\u043d\u0443\u044e \u0444\u0443\u043d\u043a\u0446\u0438\u044e \u0434\u043b\u044f \u043c\u0435\u0442\u043e\u0434\u0430 \u0442\u0440\u0430\u043f\u0435\u0446\u0438\u0439.");
       }
 
+      const snapshot = buildUnderSnapshot(fnA, a, b);
+      const integral = snapshot.signedIntegral;
+      const integralFinite = estimateIsFinite(integral);
+      const texA = expressionA ? expressionToTex(expressionA.normalized) : "f(x)";
       const width = (b - a) / tool.n;
       const polygons: GraphPolygon[] = [];
       const polylines: GraphPolyline[] = [];
@@ -683,7 +975,71 @@ export function buildOverlay(
         points.push({ x, y, color: COLORS.amber, radius: 3.5 });
       }
 
-      const exact = midpointIntegral(fnA, a, b);
+      const approximationReliable = integralFinite && used === tool.n && points.length === tool.n + 1;
+
+      if (!integralFinite) {
+        return {
+          regions: [],
+          polygons: [],
+          polylines: [],
+          points: [],
+          verticals: buildVerticals(a, b),
+          metrics: [
+            { label: "\u0422\u0440\u0430\u043f\u0435\u0446\u0438\u0438", value: "расходится", tone: "blue" },
+            { label: "\u0418\u043d\u0442\u0435\u0433\u0440\u0430\u043b", value: "расходится", tone: "emerald" },
+            { label: "\u0410\u0431\u0441. \u043e\u0448\u0438\u0431\u043a\u0430", value: "\u043d\u0435\u0434\u043e\u0441\u0442\u0443\u043f\u043d\u043e", tone: "rose" },
+            { label: "n", value: String(tool.n), tone: "slate" },
+            { label: "\u0428\u0430\u0433 h", value: formatNumber(width), tone: "amber" },
+            { label: "\u0421\u0442\u0430\u0442\u0443\u0441", value: "\u041d\u0430 \u0438\u043d\u0442\u0435\u0440\u0432\u0430\u043b\u0435 \u043d\u0435\u0442 \u043a\u043e\u0440\u0440\u0435\u043a\u0442\u043d\u043e\u0433\u043e \u043a\u043e\u043d\u0435\u0447\u043d\u043e\u0433\u043e \u0438\u043d\u0442\u0435\u0433\u0440\u0430\u043b\u0430.", tone: "slate" },
+          ],
+          formulaTex:
+            "\\int_a^b f(x)\\,dx \\approx \\frac{h}{2}\\bigl(f(x_0)+2\\sum_{i=1}^{n-1}f(x_i)+f(x_n)\\bigr)",
+          formulaSteps: [
+            "\\int_a^b f(x)\\,dx \\approx \\frac{h}{2}\\bigl(f(x_0)+2\\sum_{i=1}^{n-1}f(x_i)+f(x_n)\\bigr)",
+            `\\int_{${formatNumber(a, 3)}}^{${formatNumber(b, 3)}} ${texA}\\,dx = \\text{расходится}`,
+            "T_n \\text{ не даёт корректного конечного результата на этом интервале}",
+          ],
+          explanation: [
+            "\u041c\u0435\u0442\u043e\u0434 \u0442\u0440\u0430\u043f\u0435\u0446\u0438\u0439 \u0438\u043c\u0435\u0435\u0442 \u0441\u043c\u044b\u0441\u043b \u043a\u0430\u043a \u043f\u0440\u0438\u0431\u043b\u0438\u0436\u0435\u043d\u0438\u0435 \u0441\u0443\u0449\u0435\u0441\u0442\u0432\u0443\u044e\u0449\u0435\u0433\u043e \u043a\u043e\u043d\u0435\u0447\u043d\u043e\u0433\u043e \u0438\u043d\u0442\u0435\u0433\u0440\u0430\u043b\u0430.",
+            ...buildImproperFailureExplanation(integral),
+          ],
+          volumePreview: null,
+        };
+      }
+
+      if (!approximationReliable) {
+        return {
+          regions: [],
+          polygons: [],
+          polylines: [],
+          points: [],
+          verticals: buildVerticals(a, b),
+          metrics: [
+            { label: "\u0422\u0440\u0430\u043f\u0435\u0446\u0438\u0438", value: "\u043d\u0435\u0434\u043e\u0441\u0442\u0443\u043f\u043d\u043e", tone: "blue" },
+            { label: "\u0418\u043d\u0442\u0435\u0433\u0440\u0430\u043b", value: formatNumber(integral.value), tone: "emerald" },
+            { label: "\u0410\u0431\u0441. \u043e\u0448\u0438\u0431\u043a\u0430", value: "\u043d\u0435\u0434\u043e\u0441\u0442\u0443\u043f\u043d\u043e", tone: "rose" },
+            { label: "n", value: String(tool.n), tone: "slate" },
+            { label: "\u0428\u0430\u0433 h", value: formatNumber(width), tone: "amber" },
+            {
+              label: "\u0421\u0442\u0430\u0442\u0443\u0441",
+              value: "\u0422\u0435\u043a\u0443\u0449\u0435\u0435 \u0440\u0430\u0437\u0431\u0438\u0435\u043d\u0438\u0435 \u043f\u043e\u043f\u0430\u0434\u0430\u0435\u0442 \u0432 \u043e\u0441\u043e\u0431\u0435\u043d\u043d\u043e\u0441\u0442\u044c, \u043f\u043e\u044d\u0442\u043e\u043c\u0443 \u043c\u0435\u0442\u043e\u0434 \u0442\u0440\u0430\u043f\u0435\u0446\u0438\u0439 \u0434\u043b\u044f \u044d\u0442\u043e\u0433\u043e \u0448\u0430\u0433\u0430 \u043d\u0435 \u0441\u0442\u0440\u043e\u0438\u0442\u0441\u044f.",
+              tone: "slate",
+            },
+          ],
+          formulaTex:
+            "\\int_a^b f(x)\\,dx \\approx \\frac{h}{2}\\bigl(f(x_0)+2\\sum_{i=1}^{n-1}f(x_i)+f(x_n)\\bigr)",
+          formulaSteps: [
+            "\\int_a^b f(x)\\,dx \\approx \\frac{h}{2}\\bigl(f(x_0)+2\\sum_{i=1}^{n-1}f(x_i)+f(x_n)\\bigr)",
+            `\\int_{${formatNumber(a, 3)}}^{${formatNumber(b, 3)}} ${texA}\\,dx = ${formatNumber(integral.value)}`,
+            "T_n = \\text{недоступно для выбранного разбиения}",
+          ],
+          explanation: [
+            "\u0418\u043d\u0442\u0435\u0433\u0440\u0430\u043b \u043d\u0430 \u043e\u0442\u0440\u0435\u0437\u043a\u0435 \u0441\u0443\u0449\u0435\u0441\u0442\u0432\u0443\u0435\u0442, \u043d\u043e \u0442\u0435\u043a\u0443\u0449\u0430\u044f \u0441\u0435\u0442\u043a\u0430 \u0442\u0440\u0430\u043f\u0435\u0446\u0438\u0439 \u043f\u043e\u043f\u0430\u0434\u0430\u0435\u0442 \u0432 \u043e\u0441\u043e\u0431\u0435\u043d\u043d\u043e\u0441\u0442\u044c.",
+            ...buildImproperConvergentExplanation(integral),
+          ],
+          volumePreview: null,
+        };
+      }
 
       return {
         regions: [],
@@ -694,8 +1050,8 @@ export function buildOverlay(
         metrics: withOptionalStatus(
           [
             { label: "\u0422\u0440\u0430\u043f\u0435\u0446\u0438\u0438", value: formatNumber(approx), tone: "blue" },
-            { label: "\u0418\u043d\u0442\u0435\u0433\u0440\u0430\u043b", value: formatNumber(exact), tone: "emerald" },
-            { label: "\u0410\u0431\u0441. \u043e\u0448\u0438\u0431\u043a\u0430", value: formatNumber(Math.abs(approx - exact)), tone: "rose" },
+            { label: "\u0418\u043d\u0442\u0435\u0433\u0440\u0430\u043b", value: formatNumber(integral.value), tone: "emerald" },
+            { label: "\u0410\u0431\u0441. \u043e\u0448\u0438\u0431\u043a\u0430", value: formatNumber(Math.abs(approx - integral.value)), tone: "rose" },
             { label: "n", value: String(tool.n), tone: "slate" },
             { label: "\u0428\u0430\u0433 h", value: formatNumber(width), tone: "amber" },
             { label: "\u0422\u0440\u0430\u043f\u0435\u0446\u0438\u0439", value: String(used), tone: "violet" },
@@ -708,7 +1064,7 @@ export function buildOverlay(
         formulaSteps: [
           "\\int_a^b f(x)\\,dx \\approx \\frac{h}{2}\\bigl(f(x_0)+2\\sum_{i=1}^{n-1}f(x_i)+f(x_n)\\bigr)",
           `T_n \\approx ${formatNumber(approx)}`,
-          `\\left|T_n - I\\right| = ${formatNumber(Math.abs(approx - exact))}`,
+          `\\left|T_n - I\\right| = ${formatNumber(Math.abs(approx - integral.value))}`,
         ],
         explanation: [
           "\u041c\u0435\u0442\u043e\u0434 \u0442\u0440\u0430\u043f\u0435\u0446\u0438\u0439 \u0437\u0430\u043c\u0435\u043d\u044f\u0435\u0442 \u0434\u0443\u0433\u0443 \u0433\u0440\u0430\u0444\u0438\u043a\u0430 \u043d\u0430 \u043a\u0430\u0436\u0434\u043e\u043c \u0448\u0430\u0433\u0435 \u043e\u0442\u0440\u0435\u0437\u043a\u043e\u043c.",
@@ -764,10 +1120,12 @@ export function buildOverlay(
 
       const snapshot = buildUnderSnapshot(fnA, a, b);
       const integral = snapshot.signedIntegral;
-      const averageValue = integral.converges ? integral.value / (b - a) : Number.NaN;
+      const integralFinite = estimateIsFinite(integral);
+      const averageValue = integralFinite ? integral.value / (b - a) : Number.NaN;
+      const averageFinite = integralFinite && Number.isFinite(averageValue);
       const texA = expressionA ? expressionToTex(expressionA.normalized) : "f(x)";
       const averageFn = () => averageValue;
-      const averageRegion: GraphRegion[] = Number.isFinite(averageValue)
+      const averageRegion: GraphRegion[] = averageFinite
         ? [
             {
               x1: a,
@@ -781,7 +1139,7 @@ export function buildOverlay(
             },
           ]
         : [];
-      const polylines: GraphPolyline[] = Number.isFinite(averageValue)
+      const polylines: GraphPolyline[] = averageFinite
         ? [
             {
               points: [
@@ -794,36 +1152,49 @@ export function buildOverlay(
             },
           ]
         : [];
-      const points: GraphPoint[] = Number.isFinite(averageValue)
+      const points: GraphPoint[] = averageFinite
         ? [...snapshot.points, { x: b, y: averageValue, label: `f_avg=${formatNumber(averageValue, 3)}`, color: COLORS.amber, radius: 4 }]
         : snapshot.points;
+      const formulaSteps = averageFinite
+        ? [
+            `f_{\\text{avg}} = \\frac{1}{${formatNumber(b - a, 3)}}\\int_{${formatNumber(a, 3)}}^{${formatNumber(b, 3)}} ${texA}\\,dx`,
+            `f_{\\text{avg}} = \\frac{${integralEstimateTex(integral)}}{${formatNumber(b - a, 3)}}`,
+            `f_{\\text{avg}} = ${formatNumber(averageValue)}`,
+          ]
+        : [
+            `f_{\\text{avg}} = \\frac{1}{${formatNumber(b - a, 3)}}\\int_{${formatNumber(a, 3)}}^{${formatNumber(b, 3)}} ${texA}\\,dx`,
+            `\\int_{${formatNumber(a, 3)}}^{${formatNumber(b, 3)}} ${texA}\\,dx = \\text{расходится}`,
+            "f_{\\text{avg}} \\text{ не существует}",
+          ];
 
       return {
-        regions: [...snapshot.regions, ...averageRegion],
+        regions: averageFinite ? [...snapshot.regions, ...averageRegion] : [],
         polygons: [],
         polylines,
         points,
         verticals: buildVerticals(a, b),
         metrics: withOptionalStatus(
           [
-            { label: "\u0421\u0440\u0435\u0434\u043d\u0435\u0435 \u0437\u043d\u0430\u0447\u0435\u043d\u0438\u0435", value: formatNumber(averageValue), tone: "amber" },
+            { label: "\u0421\u0440\u0435\u0434\u043d\u0435\u0435 \u0437\u043d\u0430\u0447\u0435\u043d\u0438\u0435", value: averageFinite ? formatNumber(averageValue) : "расходится", tone: "amber" },
             { label: "\u0418\u043d\u0442\u0435\u0433\u0440\u0430\u043b", value: formatIntegralEstimate(integral), tone: "blue" },
             { label: "\u0418\u043d\u0442\u0435\u0440\u0432\u0430\u043b", value: `[${formatNumber(a, 3)}; ${formatNumber(b, 3)}]`, tone: "slate" },
           ],
           "\u041d\u0435 \u0443\u0434\u0430\u043b\u043e\u0441\u044c \u043a\u043e\u0440\u0440\u0435\u043a\u0442\u043d\u043e \u043e\u0446\u0435\u043d\u0438\u0442\u044c \u0441\u0440\u0435\u0434\u043d\u0435\u0435 \u0437\u043d\u0430\u0447\u0435\u043d\u0438\u0435.",
-          !snapshot.regions.length && !Number.isFinite(averageValue),
+          !averageFinite,
         ),
         formulaTex: `f_{\\text{avg}} = \\frac{1}{${formatNumber(b - a, 3)}}\\int_{${formatNumber(a, 3)}}^{${formatNumber(b, 3)}} ${texA}\\,dx`,
-        formulaSteps: [
-          `f_{\\text{avg}} = \\frac{1}{${formatNumber(b - a, 3)}}\\int_{${formatNumber(a, 3)}}^{${formatNumber(b, 3)}} ${texA}\\,dx`,
-          `f_{\\text{avg}} = \\frac{${integralEstimateTex(integral)}}{${formatNumber(b - a, 3)}}`,
-          `f_{\\text{avg}} = ${Number.isFinite(averageValue) ? formatNumber(averageValue) : "\\text{расходится}"}`,
-        ],
-        explanation: [
-          "\u0421\u0440\u0435\u0434\u043d\u0435\u0435 \u0437\u043d\u0430\u0447\u0435\u043d\u0438\u0435 \u0444\u0443\u043d\u043a\u0446\u0438\u0438 \u2014 \u044d\u0442\u043e \u0442\u0430\u043a\u0430\u044f \u0432\u044b\u0441\u043e\u0442\u0430 \u043f\u0440\u044f\u043c\u043e\u0443\u0433\u043e\u043b\u044c\u043d\u0438\u043a\u0430 \u043d\u0430 \u0442\u043e\u043c \u0436\u0435 \u043e\u0441\u043d\u043e\u0432\u0430\u043d\u0438\u0438, \u043f\u0440\u0438 \u043a\u043e\u0442\u043e\u0440\u043e\u0439 \u043f\u043b\u043e\u0449\u0430\u0434\u044c \u0441\u043e\u0432\u043f\u0430\u0434\u0430\u0435\u0442.",
-          "\u0421\u0438\u043d\u044f\u044f/\u0440\u043e\u0437\u043e\u0432\u0430\u044f \u0437\u0430\u043a\u0440\u0430\u0441\u043a\u0430 \u043f\u043e\u043a\u0430\u0437\u044b\u0432\u0430\u0435\u0442 \u043e\u0431\u043b\u0430\u0441\u0442\u044c \u043f\u043e\u0434 \u0433\u0440\u0430\u0444\u0438\u043a\u043e\u043c, \u0430 \u044f\u043d\u0442\u0430\u0440\u043d\u044b\u0439 \u0441\u043b\u043e\u0439 \u2014 \u043f\u0440\u044f\u043c\u043e\u0443\u0433\u043e\u043b\u044c\u043d\u0438\u043a \u0441\u0440\u0435\u0434\u043d\u0435\u0439 \u0432\u044b\u0441\u043e\u0442\u044b.",
-          "\u0412 \u043c\u0435\u0441\u0442\u0430\u0445 \u043d\u0430\u043b\u043e\u0436\u0435\u043d\u0438\u044f \u0441\u043b\u043e\u0451\u0432 \u043f\u043e\u044f\u0432\u043b\u044f\u0435\u0442\u0441\u044f \u0442\u0440\u0435\u0442\u0438\u0439 \u043e\u0442\u0442\u0435\u043d\u043e\u043a, \u043a\u043e\u0442\u043e\u0440\u044b\u0439 \u043d\u0430\u0433\u043b\u044f\u0434\u043d\u043e \u043f\u043e\u043a\u0430\u0437\u044b\u0432\u0430\u0435\u0442 \u0441\u043e\u0432\u043f\u0430\u0434\u0430\u044e\u0449\u0443\u044e \u0447\u0430\u0441\u0442\u044c \u043f\u043b\u043e\u0449\u0430\u0434\u0435\u0439.",
-        ],
+        formulaSteps,
+        explanation: averageFinite
+          ? [
+              "\u0421\u0440\u0435\u0434\u043d\u0435\u0435 \u0437\u043d\u0430\u0447\u0435\u043d\u0438\u0435 \u0444\u0443\u043d\u043a\u0446\u0438\u0438 \u2014 \u044d\u0442\u043e \u0442\u0430\u043a\u0430\u044f \u0432\u044b\u0441\u043e\u0442\u0430 \u043f\u0440\u044f\u043c\u043e\u0443\u0433\u043e\u043b\u044c\u043d\u0438\u043a\u0430 \u043d\u0430 \u0442\u043e\u043c \u0436\u0435 \u043e\u0441\u043d\u043e\u0432\u0430\u043d\u0438\u0438, \u043f\u0440\u0438 \u043a\u043e\u0442\u043e\u0440\u043e\u0439 \u043f\u043b\u043e\u0449\u0430\u0434\u044c \u0441\u043e\u0432\u043f\u0430\u0434\u0430\u0435\u0442.",
+              "\u0421\u0438\u043d\u044f\u044f/\u0440\u043e\u0437\u043e\u0432\u0430\u044f \u0437\u0430\u043a\u0440\u0430\u0441\u043a\u0430 \u043f\u043e\u043a\u0430\u0437\u044b\u0432\u0430\u0435\u0442 \u043e\u0431\u043b\u0430\u0441\u0442\u044c \u043f\u043e\u0434 \u0433\u0440\u0430\u0444\u0438\u043a\u043e\u043c, \u0430 \u044f\u043d\u0442\u0430\u0440\u043d\u044b\u0439 \u0441\u043b\u043e\u0439 \u2014 \u043f\u0440\u044f\u043c\u043e\u0443\u0433\u043e\u043b\u044c\u043d\u0438\u043a \u0441\u0440\u0435\u0434\u043d\u0435\u0439 \u0432\u044b\u0441\u043e\u0442\u044b.",
+              "\u0412 \u043c\u0435\u0441\u0442\u0430\u0445 \u043d\u0430\u043b\u043e\u0436\u0435\u043d\u0438\u044f \u0441\u043b\u043e\u0451\u0432 \u043f\u043e\u044f\u0432\u043b\u044f\u0435\u0442\u0441\u044f \u0442\u0440\u0435\u0442\u0438\u0439 \u043e\u0442\u0442\u0435\u043d\u043e\u043a, \u043a\u043e\u0442\u043e\u0440\u044b\u0439 \u043d\u0430\u0433\u043b\u044f\u0434\u043d\u043e \u043f\u043e\u043a\u0430\u0437\u044b\u0432\u0430\u0435\u0442 \u0441\u043e\u0432\u043f\u0430\u0434\u0430\u044e\u0449\u0443\u044e \u0447\u0430\u0441\u0442\u044c \u043f\u043b\u043e\u0449\u0430\u0434\u0435\u0439.",
+            ]
+          : [
+              "\u0421\u0440\u0435\u0434\u043d\u0435\u0435 \u0437\u043d\u0430\u0447\u0435\u043d\u0438\u0435 \u0444\u0443\u043d\u043a\u0446\u0438\u0438 \u043e\u043f\u0440\u0435\u0434\u0435\u043b\u044f\u0435\u0442\u0441\u044f \u0442\u043e\u043b\u044c\u043a\u043e \u0447\u0435\u0440\u0435\u0437 \u043a\u043e\u043d\u0435\u0447\u043d\u044b\u0439 \u043e\u043f\u0440\u0435\u0434\u0435\u043b\u0451\u043d\u043d\u044b\u0439 \u0438\u043d\u0442\u0435\u0433\u0440\u0430\u043b.",
+              ...buildImproperFailureExplanation(integral),
+              "\u041f\u043e\u044d\u0442\u043e\u043c\u0443 \u0441\u0440\u0435\u0434\u043d\u0435\u0435 \u0437\u043d\u0430\u0447\u0435\u043d\u0438\u0435 \u043d\u0430 \u0432\u044b\u0431\u0440\u0430\u043d\u043d\u043e\u043c \u0438\u043d\u0442\u0435\u0440\u0432\u0430\u043b\u0435 \u043d\u0435 \u0441\u0443\u0449\u0435\u0441\u0442\u0432\u0443\u0435\u0442.",
+            ],
         volumePreview: null,
       };
     }

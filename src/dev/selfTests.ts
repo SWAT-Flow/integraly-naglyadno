@@ -70,6 +70,7 @@ export function runSelfTests(): SelfTestResult[] {
   const prettySimpleFraction = snapshotPrettyExpression(buildPrettyExpression("1/x"));
   const prettyPowerFraction = snapshotPrettyExpression(buildPrettyExpression("1/x^2"));
   const prettyGroupedFraction = snapshotPrettyExpression(buildPrettyExpression("(x+1)/(x-1)"));
+  const prettyPi = snapshotPrettyExpression(buildPrettyExpression("pi"));
   const prettySqrt = snapshotPrettyExpression(buildPrettyExpression("sqrt(x)"));
   const prettyAbs = snapshotPrettyExpression(buildPrettyExpression("abs(x)"));
   const prettySin = snapshotPrettyExpression(buildPrettyExpression("sin(x)"));
@@ -84,6 +85,13 @@ export function runSelfTests(): SelfTestResult[] {
   const validMap = new Map(validExpressions.map((expression) => [expression.id, expression]));
   const logarithmExpression = makeCompiledExpression("ln-test", "ln(x)");
   const reciprocalExpression = makeCompiledExpression("reciprocal-test", "1 / x");
+  const reciprocalSquaredExpression = makeCompiledExpression("reciprocal-squared-test", "1 / x^2");
+  const sineExpression = makeCompiledExpression("sine-test", "sin(x)");
+  const squareExpression = makeCompiledExpression("square-test", "x^2");
+  const signedIntegralLabel = "\u041f\u043e\u0434\u043f\u0438\u0441\u0430\u043d\u043d\u044b\u0439 \u0438\u043d\u0442\u0435\u0433\u0440\u0430\u043b";
+  const geometricAreaLabel = "\u0413\u0435\u043e\u043c\u0435\u0442\u0440\u0438\u0447\u0435\u0441\u043a\u0430\u044f \u043f\u043b\u043e\u0449\u0430\u0434\u044c";
+  const areaLabel = "\u041f\u043b\u043e\u0449\u0430\u0434\u044c";
+  const divergentValue = "\u0440\u0430\u0441\u0445\u043e\u0434\u0438\u0442\u0441\u044f";
 
   const normalizedTool = normalizeTool(
     {
@@ -111,6 +119,28 @@ export function runSelfTests(): SelfTestResult[] {
     [validExpressions[0]],
     new Map([["f", validExpressions[0]]]),
   );
+  const divergentBetweenOverlay =
+    reciprocalSquaredExpression !== null && sineExpression !== null
+      ? buildOverlay(
+          { mode: "between", exprA: "reciprocal-squared-test", exprB: "sine-test", a: -3, b: 3, n: 5, sample: "mid" },
+          [reciprocalSquaredExpression, sineExpression],
+          new Map([
+            ["reciprocal-squared-test", reciprocalSquaredExpression],
+            ["sine-test", sineExpression],
+          ]),
+        )
+      : null;
+  const finiteBetweenOverlay =
+    squareExpression !== null && sineExpression !== null
+      ? buildOverlay(
+          { mode: "between", exprA: "square-test", exprB: "sine-test", a: -3, b: 3, n: 5, sample: "mid" },
+          [squareExpression, sineExpression],
+          new Map([
+            ["square-test", squareExpression],
+            ["sine-test", sineExpression],
+          ]),
+        )
+      : null;
   const invalidUnderOverlay = buildOverlay(
     { mode: "under", exprA: "missing", a: 0, b: 1, n: 5, sample: "mid" },
     validExpressions,
@@ -122,11 +152,43 @@ export function runSelfTests(): SelfTestResult[] {
     validExpressions,
     validMap,
   );
+  const logarithmRiemannLeftOverlay =
+    logarithmExpression !== null
+      ? buildOverlay(
+          { mode: "riemann", exprA: "ln-test", a: 0, b: 3, n: 6, sample: "left" },
+          [logarithmExpression],
+          new Map([["ln-test", logarithmExpression]]),
+        )
+      : null;
+  const reciprocalRiemannOverlay =
+    reciprocalExpression !== null
+      ? buildOverlay(
+          { mode: "riemann", exprA: "reciprocal-test", a: 0, b: 3, n: 6, sample: "mid" },
+          [reciprocalExpression],
+          new Map([["reciprocal-test", reciprocalExpression]]),
+        )
+      : null;
   const trapOverlay = buildOverlay(
     { mode: "trap", exprA: "f", a: 0, b: 1, n: 1, sample: "mid" },
     validExpressions,
     validMap,
   );
+  const logarithmTrapOverlay =
+    logarithmExpression !== null
+      ? buildOverlay(
+          { mode: "trap", exprA: "ln-test", a: 0, b: 3, n: 6, sample: "mid" },
+          [logarithmExpression],
+          new Map([["ln-test", logarithmExpression]]),
+        )
+      : null;
+  const reciprocalSquaredTrapOverlay =
+    reciprocalSquaredExpression !== null
+      ? buildOverlay(
+          { mode: "trap", exprA: "reciprocal-squared-test", a: -3, b: 3, n: 6, sample: "mid" },
+          [reciprocalSquaredExpression],
+          new Map([["reciprocal-squared-test", reciprocalSquaredExpression]]),
+        )
+      : null;
   const volumeOverlay = buildOverlay(
     { mode: "volume", exprA: "f", a: Number.NEGATIVE_INFINITY, b: 4000, n: 5, sample: "mid" },
     validExpressions,
@@ -137,6 +199,22 @@ export function runSelfTests(): SelfTestResult[] {
     validExpressions,
     validMap,
   );
+  const reciprocalAverageOverlay =
+    reciprocalExpression !== null
+      ? buildOverlay(
+          { mode: "averageValue", exprA: "reciprocal-test", a: 0, b: 3, n: 5, sample: "mid" },
+          [reciprocalExpression],
+          new Map([["reciprocal-test", reciprocalExpression]]),
+        )
+      : null;
+  const reciprocalSquaredAverageOverlay =
+    reciprocalSquaredExpression !== null
+      ? buildOverlay(
+          { mode: "averageValue", exprA: "reciprocal-squared-test", a: -3, b: 3, n: 5, sample: "mid" },
+          [reciprocalSquaredExpression],
+          new Map([["reciprocal-squared-test", reciprocalSquaredExpression]]),
+        )
+      : null;
   const newtonOverlay = buildOverlay(
     { mode: "newtonLeibniz", exprA: "f", a: 0, b: 2, n: 5, sample: "mid" },
     validExpressions,
@@ -158,6 +236,30 @@ export function runSelfTests(): SelfTestResult[] {
           { mode: "under", exprA: "reciprocal-test", a: 0, b: 3, n: 5, sample: "mid" },
           [reciprocalExpression],
           new Map([["reciprocal-test", reciprocalExpression]]),
+        )
+      : null;
+  const reciprocalSymmetricUnderOverlay =
+    reciprocalExpression !== null
+      ? buildOverlay(
+          { mode: "under", exprA: "reciprocal-test", a: -3, b: 3, n: 5, sample: "mid" },
+          [reciprocalExpression],
+          new Map([["reciprocal-test", reciprocalExpression]]),
+        )
+      : null;
+  const reciprocalSquaredUnderOverlay =
+    reciprocalSquaredExpression !== null
+      ? buildOverlay(
+          { mode: "under", exprA: "reciprocal-squared-test", a: 0, b: 3, n: 5, sample: "mid" },
+          [reciprocalSquaredExpression],
+          new Map([["reciprocal-squared-test", reciprocalSquaredExpression]]),
+        )
+      : null;
+  const reciprocalSquaredSymmetricUnderOverlay =
+    reciprocalSquaredExpression !== null
+      ? buildOverlay(
+          { mode: "under", exprA: "reciprocal-squared-test", a: -3, b: 3, n: 5, sample: "mid" },
+          [reciprocalSquaredExpression],
+          new Map([["reciprocal-squared-test", reciprocalSquaredExpression]]),
         )
       : null;
   const allPracticeItems = LEARNING_MODULES.flatMap((module) =>
@@ -202,6 +304,7 @@ export function runSelfTests(): SelfTestResult[] {
       `pretty renderer builds (x+1)/(x-1) as grouped fraction`,
       prettyGroupedFraction === "frac(group(seq(x + 1))|group(seq(x − 1)))",
     ),
+    pass(`pretty renderer displays pi as π`, prettyPi === "\u03c0"),
     pass(`pretty renderer builds sqrt(x) as root`, prettySqrt === "sqrt(x)"),
     pass(`pretty renderer builds abs(x) as modulus`, prettyAbs === "abs(x)"),
     pass(`pretty renderer builds sin(x) as a function node`, prettySin === "fn(sin|x)"),
@@ -291,6 +394,27 @@ export function runSelfTests(): SelfTestResult[] {
       betweenOverlay.metrics.length > 0 && betweenOverlay.regions.length === 0,
     ),
     pass(
+      `between marks 1/x^2 and sin(x) on [-3,3] as divergent`,
+      divergentBetweenOverlay !== null &&
+        divergentBetweenOverlay.metrics.some((metric) => metric.label === areaLabel && metric.value === divergentValue),
+    ),
+    pass(
+      `divergent between does not build finite segment formulas`,
+      divergentBetweenOverlay !== null &&
+        divergentBetweenOverlay.formulaSteps.some((step) => step === "S = \\text{расходится}") &&
+        divergentBetweenOverlay.formulaSteps.every((step) => !/^S_\d+ =/.test(step)),
+    ),
+    pass(
+      `divergent between hides ordinary area shading`,
+      divergentBetweenOverlay !== null && divergentBetweenOverlay.regions.length === 0,
+    ),
+    pass(
+      `finite between case stays finite and keeps overlay shading`,
+      finiteBetweenOverlay !== null &&
+        finiteBetweenOverlay.metrics.some((metric) => metric.label === areaLabel && metric.value !== divergentValue) &&
+        finiteBetweenOverlay.regions.length > 0,
+    ),
+    pass(
       `buildOverlay under repairs invalid exprA safely`,
       invalidUnderOverlay.metrics.length > 0 && invalidUnderOverlay.verticals.length === 2,
     ),
@@ -316,9 +440,86 @@ export function runSelfTests(): SelfTestResult[] {
         ),
     ),
     pass(
+      `under keeps geometric area for ln(x) on [0,3] finite`,
+      logarithmUnderOverlay !== null &&
+        logarithmUnderOverlay.metrics.some(
+          (metric) => metric.label === geometricAreaLabel && metric.value !== divergentValue && metric.value !== "-",
+        ),
+    ),
+    pass(
+      `under marks 1/x^2 on [0,3] as divergent`,
+      reciprocalSquaredUnderOverlay !== null &&
+        reciprocalSquaredUnderOverlay.metrics.some(
+          (metric) => metric.label === signedIntegralLabel && metric.value === divergentValue,
+        ),
+    ),
+    pass(
+      `under marks 1/x^2 on [-3,3] as divergent`,
+      reciprocalSquaredSymmetricUnderOverlay !== null &&
+        reciprocalSquaredSymmetricUnderOverlay.metrics.some(
+          (metric) => metric.label === signedIntegralLabel && metric.value === divergentValue,
+        ),
+    ),
+    pass(
+      `under marks geometric area for 1/x^2 on [-3,3] as divergent`,
+      reciprocalSquaredSymmetricUnderOverlay !== null &&
+        reciprocalSquaredSymmetricUnderOverlay.metrics.some(
+          (metric) => metric.label === geometricAreaLabel && metric.value === divergentValue,
+        ),
+    ),
+    pass(
+      `under treats 1/x on [-3,3] as an ordinary divergent improper integral`,
+      reciprocalSymmetricUnderOverlay !== null &&
+        reciprocalSymmetricUnderOverlay.metrics.some(
+          (metric) => metric.label === signedIntegralLabel && metric.value === divergentValue,
+        ),
+    ),
+    pass(
+      `under hides ordinary finite-area shading when result diverges`,
+      reciprocalSquaredSymmetricUnderOverlay !== null && reciprocalSquaredSymmetricUnderOverlay.regions.length === 0,
+    ),
+    pass(
       `riemann/trap normalize bad n to 2`,
       riemannOverlay.metrics.some((metric) => metric.label === "n" && metric.value === "2") &&
         trapOverlay.metrics.some((metric) => metric.label === "n" && metric.value === "2"),
+    ),
+    pass(
+      `riemann marks 1/x on [0,3] as divergent instead of a finite approximation`,
+      reciprocalRiemannOverlay !== null &&
+        reciprocalRiemannOverlay.metrics.some(
+          (metric) => metric.label === "Сумма Римана" && metric.value === divergentValue,
+        ) &&
+        reciprocalRiemannOverlay.polygons.length === 0,
+    ),
+    pass(
+      `trap marks 1/x^2 on [-3,3] as divergent instead of a finite approximation`,
+      reciprocalSquaredTrapOverlay !== null &&
+        reciprocalSquaredTrapOverlay.metrics.some(
+          (metric) => metric.label === "Трапеции" && metric.value === divergentValue,
+        ) &&
+        reciprocalSquaredTrapOverlay.polygons.length === 0,
+    ),
+    pass(
+      `riemann keeps finite ln(x) integral but hides approximation when left samples hit the singular boundary`,
+      logarithmRiemannLeftOverlay !== null &&
+        logarithmRiemannLeftOverlay.metrics.some(
+          (metric) => metric.label === "Интеграл" && metric.value !== divergentValue && metric.value !== "-",
+        ) &&
+        logarithmRiemannLeftOverlay.metrics.some(
+          (metric) => metric.label === "Сумма Римана" && metric.value === "недоступно",
+        ) &&
+        logarithmRiemannLeftOverlay.polygons.length === 0,
+    ),
+    pass(
+      `trap keeps finite ln(x) integral but hides approximation when endpoints hit the singular boundary`,
+      logarithmTrapOverlay !== null &&
+        logarithmTrapOverlay.metrics.some(
+          (metric) => metric.label === "Интеграл" && metric.value !== divergentValue && metric.value !== "-",
+        ) &&
+        logarithmTrapOverlay.metrics.some(
+          (metric) => metric.label === "Трапеции" && metric.value === "недоступно",
+        ) &&
+        logarithmTrapOverlay.polygons.length === 0,
     ),
     pass(
       `volume overlay clamps bad bounds and returns preview`,
@@ -334,6 +535,27 @@ export function runSelfTests(): SelfTestResult[] {
     pass(
       `average value overlay adds overlay shading for the average rectangle`,
       averageOverlay.regions.length >= 2,
+    ),
+    pass(
+      `average value marks 1/x on [0,3] as divergent`,
+      reciprocalAverageOverlay !== null &&
+        reciprocalAverageOverlay.metrics.some(
+          (metric) => metric.label === "Среднее значение" && metric.value === divergentValue,
+        ) &&
+        reciprocalAverageOverlay.polylines.length === 0,
+    ),
+    pass(
+      `average value marks 1/x^2 on [-3,3] as divergent`,
+      reciprocalSquaredAverageOverlay !== null &&
+        reciprocalSquaredAverageOverlay.metrics.some(
+          (metric) => metric.label === "Среднее значение" && metric.value === divergentValue,
+        ) &&
+        reciprocalSquaredAverageOverlay.regions.length === 0,
+    ),
+    pass(
+      `average value divergent formula avoids a fraction with "расходится" inside`,
+      reciprocalSquaredAverageOverlay !== null &&
+        reciprocalSquaredAverageOverlay.formulaSteps.every((step) => !step.includes("\\frac{\\text{расходится}}")),
     ),
     pass(
       `newton-leibniz overlay stays safe and returns formula steps`,

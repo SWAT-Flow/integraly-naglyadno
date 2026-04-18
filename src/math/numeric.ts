@@ -167,6 +167,145 @@ export function midpointIntegral(
   return sign * sum * step;
 }
 
+function safeSample(fn: (x: number) => number, x: number): number {
+  try {
+    const value = fn(x);
+    return Number.isFinite(value) ? value : Number.NaN;
+  } catch {
+    return Number.NaN;
+  }
+}
+
+function sampleSeverity(value: number): number {
+  return Number.isFinite(value) ? Math.abs(value) : Number.POSITIVE_INFINITY;
+}
+
+function suspiciousTriple(leftValue: number, middleValue: number, rightValue: number): boolean {
+  const values = [leftValue, middleValue, rightValue];
+  if (values.some((value) => !Number.isFinite(value))) {
+    return true;
+  }
+
+  const magnitudes = values.map((value) => Math.abs(value));
+  const maxMagnitude = Math.max(...magnitudes);
+  if (maxMagnitude < 48) {
+    return false;
+  }
+
+  const minMagnitude = Math.max(1, Math.min(...magnitudes));
+  const explosiveRatio = maxMagnitude / minMagnitude > 24;
+  const jumpLeft = Math.abs(middleValue - leftValue) > Math.max(32, Math.abs(leftValue) * 6);
+  const jumpRight = Math.abs(rightValue - middleValue) > Math.max(32, Math.abs(rightValue) * 6);
+  const signFlip =
+    Math.sign(leftValue) !== Math.sign(middleValue) || Math.sign(middleValue) !== Math.sign(rightValue);
+
+  return explosiveRatio && (jumpLeft || jumpRight || signFlip);
+}
+
+function refineSingularityCandidate(
+  fn: (x: number) => number,
+  left: number,
+  right: number,
+  iterations = 12,
+): number {
+  let start = left;
+  let end = right;
+
+  for (let index = 0; index < iterations; index += 1) {
+    const span = end - start;
+    if (!(span > 1e-8)) {
+      break;
+    }
+
+    const x1 = start + span * 0.25;
+    const x2 = start + span * 0.5;
+    const x3 = start + span * 0.75;
+    const samples = [
+      { x: start, y: safeSample(fn, start) },
+      { x: x1, y: safeSample(fn, x1) },
+      { x: x2, y: safeSample(fn, x2) },
+      { x: x3, y: safeSample(fn, x3) },
+      { x: end, y: safeSample(fn, end) },
+    ];
+
+    const nonFiniteIndex = samples.findIndex((sample, sampleIndex) => sampleIndex > 0 && sampleIndex < 4 && !Number.isFinite(sample.y));
+    if (nonFiniteIndex >= 0) {
+      start = samples[nonFiniteIndex - 1].x;
+      end = samples[nonFiniteIndex + 1].x;
+      continue;
+    }
+
+    let bestLeft = start;
+    let bestRight = end;
+    let bestScore = Number.NEGATIVE_INFINITY;
+
+    for (let sampleIndex = 0; sampleIndex < samples.length - 1; sampleIndex += 1) {
+      const current = samples[sampleIndex];
+      const next = samples[sampleIndex + 1];
+      const currentSeverity = sampleSeverity(current.y);
+      const nextSeverity = sampleSeverity(next.y);
+      const minSeverity = Math.max(1, Math.min(currentSeverity, nextSeverity));
+      const signWeight = Math.sign(current.y) !== Math.sign(next.y) ? 2 : 1;
+      const score = Math.max(currentSeverity, nextSeverity) * signWeight * (Math.max(currentSeverity, nextSeverity) / minSeverity);
+
+      if (score > bestScore) {
+        bestScore = score;
+        bestLeft = current.x;
+        bestRight = next.x;
+      }
+    }
+
+    if (!(bestRight - bestLeft < span)) {
+      break;
+    }
+
+    start = bestLeft;
+    end = bestRight;
+  }
+
+  return (start + end) / 2;
+}
+
+export function findSingularityCandidates(
+  fn: (x: number) => number,
+  a: number,
+  b: number,
+  samples = 1024,
+): number[] {
+  const [left, right] = sortAB(a, b);
+  if (!(right > left)) {
+    return [];
+  }
+
+  const step = (right - left) / samples;
+  const grid = Array.from({ length: samples + 1 }, (_, index) => {
+    const x = index === samples ? right : left + step * index;
+    return { x, y: safeSample(fn, x) };
+  });
+
+  const candidates: number[] = [];
+  for (let index = 1; index < grid.length - 1; index += 1) {
+    const previous = grid[index - 1];
+    const current = grid[index];
+    const next = grid[index + 1];
+
+    if (!Number.isFinite(current.y)) {
+      candidates.push(current.x);
+      continue;
+    }
+
+    if (!Number.isFinite(previous.y) || !Number.isFinite(next.y) || suspiciousTriple(previous.y, current.y, next.y)) {
+      candidates.push(refineSingularityCandidate(fn, previous.x, next.x));
+    }
+  }
+
+  const epsilon = Math.max(step * 3, 1e-4);
+  return uniqueSorted(
+    candidates.filter((value) => value > left + epsilon && value < right - epsilon),
+    epsilon,
+  );
+}
+
 export function niceStep(span: number, targetTicks = 10): number {
   const safeSpan = Math.abs(asFinite(span, 1));
   if (safeSpan <= 0) {

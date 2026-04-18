@@ -56,27 +56,13 @@ function splitDisplayText(
   const displayLength = characters.length;
 
   if (!selection) {
-    return [
-      {
-        rawStart,
-        rawEnd,
-        text: display,
-        key: `${keyPrefix}-full`,
-      },
-    ];
+    return [{ rawStart, rawEnd, text: display, key: `${keyPrefix}-full` }];
   }
 
   if (selection.start === selection.end) {
     const caret = selection.start;
     if (caret < rawStart || caret > rawEnd) {
-      return [
-        {
-          rawStart,
-          rawEnd,
-          text: display,
-          key: `${keyPrefix}-full`,
-        },
-      ];
+      return [{ rawStart, rawEnd, text: display, key: `${keyPrefix}-full` }];
     }
 
     const offset = toDisplayOffset(caret, rawStart, rawEnd, displayLength);
@@ -100,14 +86,7 @@ function splitDisplayText(
   const overlapStart = Math.max(selection.start, rawStart);
   const overlapEnd = Math.min(selection.end, rawEnd);
   if (overlapStart >= overlapEnd) {
-    return [
-      {
-        rawStart,
-        rawEnd,
-        text: display,
-        key: `${keyPrefix}-full`,
-      },
-    ];
+    return [{ rawStart, rawEnd, text: display, key: `${keyPrefix}-full` }];
   }
 
   let selectedStartOffset = toDisplayOffset(overlapStart, rawStart, rawEnd, displayLength);
@@ -205,10 +184,9 @@ function renderPlaceholder(node: Extract<PrettyNode, { kind: "placeholder" }>, s
 }
 
 function renderLeaf(node: PrettyLeafNode, selection: SelectionRange | null, key: string) {
-  const tokenClassName = `pretty-expression-token-${node.leafType}`;
   return (
     <Fragment key={key}>
-      {renderInteractiveLeaf(node.display, node.rawStart, node.rawEnd, selection, tokenClassName, key)}
+      {renderInteractiveLeaf(node.display, node.rawStart, node.rawEnd, selection, `pretty-expression-token-${node.leafType}`, key)}
     </Fragment>
   );
 }
@@ -216,17 +194,10 @@ function renderLeaf(node: PrettyLeafNode, selection: SelectionRange | null, key:
 function renderFunctionLabel(node: PrettyFunctionNode, selection: SelectionRange | null, key: string) {
   return (
     <span key={key} className="pretty-expression-function-label">
-      {renderInteractiveLeaf(
-        node.label,
-        node.nameStart,
-        node.nameEnd,
-        selection,
-        "pretty-expression-token-function",
-        `${key}-label`,
-      )}
+      {renderInteractiveLeaf(node.label, node.nameStart, node.nameEnd, selection, "pretty-expression-token-function", `${key}-label`)}
       {node.inverse ? (
         <span className="pretty-expression-function-inverse">
-          <span className="pretty-expression-function-inverse-text">−1</span>
+          <span className="pretty-expression-function-inverse-text">\u22121</span>
         </span>
       ) : null}
     </span>
@@ -237,14 +208,17 @@ function renderNode(node: PrettyNode, selection: SelectionRange | null, key: str
   switch (node.kind) {
     case "leaf":
       return renderLeaf(node, selection, key);
+
     case "placeholder":
       return renderPlaceholder(node, selection, key);
+
     case "sequence":
       return (
         <span key={key} className="pretty-expression-sequence">
           {node.children.map((child, index) => renderNode(child, selection, `${key}-${index}`))}
         </span>
       );
+
     case "group":
       return (
         <span key={key} className="pretty-expression-group">
@@ -255,6 +229,7 @@ function renderNode(node: PrettyNode, selection: SelectionRange | null, key: str
             : null}
         </span>
       );
+
     case "power":
       return (
         <span key={key} className="pretty-expression-power">
@@ -262,32 +237,34 @@ function renderNode(node: PrettyNode, selection: SelectionRange | null, key: str
           <span className="pretty-expression-power-exponent">{renderNode(node.exponent, selection, `${key}-exp`)}</span>
         </span>
       );
+
     case "fraction":
       return (
         <span key={key} className="pretty-expression-fraction">
-          <span className="pretty-expression-fraction-numerator">
-            {renderNode(node.numerator, selection, `${key}-num`)}
-          </span>
+          <span className="pretty-expression-fraction-numerator">{renderNode(node.numerator, selection, `${key}-num`)}</span>
           <span
             className="pretty-expression-fraction-line"
             data-display-length={1}
             data-raw-end={node.slashEnd}
             data-raw-start={node.slashStart}
           />
-          <span className="pretty-expression-fraction-denominator">
-            {renderNode(node.denominator, selection, `${key}-den`)}
-          </span>
+          <span className="pretty-expression-fraction-denominator">{renderNode(node.denominator, selection, `${key}-den`)}</span>
         </span>
       );
+
     case "function":
       if (node.functionType === "sqrt") {
         return (
           <span key={key} className="pretty-expression-sqrt">
-            {renderInteractiveLeaf("√", node.nameStart, node.nameEnd, selection, "pretty-expression-token-function", `${key}-root`)}
+            {renderInteractiveLeaf("\u221a", node.nameStart, node.nameEnd, selection, "pretty-expression-token-function", `${key}-root`)}
             {node.openStart !== null && node.openEnd !== null
               ? renderInteractiveLeaf("(", node.openStart, node.openEnd, selection, "pretty-expression-token-paren", `${key}-open`)
               : null}
-            {renderNode(node.args[0] ?? { kind: "placeholder", placeholderType: "argument", rawStart: node.rawEnd, rawEnd: node.rawEnd }, selection, `${key}-arg`)}
+            {renderNode(
+              node.args[0] ?? { kind: "placeholder", placeholderType: "argument", rawStart: node.rawEnd, rawEnd: node.rawEnd },
+              selection,
+              `${key}-arg`,
+            )}
             {node.closeStart !== null && node.closeEnd !== null
               ? renderInteractiveLeaf(")", node.closeStart, node.closeEnd, selection, "pretty-expression-token-paren", `${key}-close`)
               : null}
@@ -304,7 +281,11 @@ function renderNode(node: PrettyNode, selection: SelectionRange | null, key: str
         return (
           <span key={key} className="pretty-expression-abs">
             {renderInteractiveLeaf("|", leftStart, leftEnd, selection, "pretty-expression-token-abs", `${key}-left`)}
-            {renderNode(node.args[0] ?? { kind: "placeholder", placeholderType: "argument", rawStart: leftEnd, rawEnd: leftEnd }, selection, `${key}-arg`)}
+            {renderNode(
+              node.args[0] ?? { kind: "placeholder", placeholderType: "argument", rawStart: leftEnd, rawEnd: leftEnd },
+              selection,
+              `${key}-arg`,
+            )}
             {renderInteractiveLeaf("|", rightStart, rightEnd, selection, "pretty-expression-token-abs", `${key}-right`)}
           </span>
         );
@@ -315,10 +296,18 @@ function renderNode(node: PrettyNode, selection: SelectionRange | null, key: str
           <span key={key} className="pretty-expression-log-base">
             <span className="pretty-expression-log-base-label">{renderFunctionLabel(node, selection, `${key}-label`)}</span>
             <span className="pretty-expression-log-base-subscript">
-              {renderNode(node.args[0] ?? { kind: "placeholder", placeholderType: "argument", rawStart: node.rawEnd, rawEnd: node.rawEnd }, selection, `${key}-base`)}
+              {renderNode(
+                node.args[0] ?? { kind: "placeholder", placeholderType: "argument", rawStart: node.rawEnd, rawEnd: node.rawEnd },
+                selection,
+                `${key}-base`,
+              )}
             </span>
             {renderInteractiveLeaf("(", node.openStart ?? node.nameEnd, node.openEnd ?? node.nameEnd, selection, "pretty-expression-token-paren", `${key}-open`)}
-            {renderNode(node.args[1] ?? { kind: "placeholder", placeholderType: "argument", rawStart: node.rawEnd, rawEnd: node.rawEnd }, selection, `${key}-value`)}
+            {renderNode(
+              node.args[1] ?? { kind: "placeholder", placeholderType: "argument", rawStart: node.rawEnd, rawEnd: node.rawEnd },
+              selection,
+              `${key}-value`,
+            )}
             {node.closeStart !== null && node.closeEnd !== null
               ? renderInteractiveLeaf(")", node.closeStart, node.closeEnd, selection, "pretty-expression-token-paren", `${key}-close`)
               : null}
@@ -407,9 +396,7 @@ function PrettyExpressionComponent({
   onPointerDown,
 }: PrettyExpressionProps) {
   const selection =
-    selectionStart !== undefined && selectionEnd !== undefined
-      ? { start: selectionStart, end: selectionEnd }
-      : null;
+    selectionStart !== undefined && selectionEnd !== undefined ? { start: selectionStart, end: selectionEnd } : null;
   const model = useMemo(() => buildPrettyExpression(expression), [expression]);
 
   return (

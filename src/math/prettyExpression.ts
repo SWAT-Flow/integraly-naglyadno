@@ -114,7 +114,7 @@ const FUNCTION_META: Record<string, FunctionMeta> = {
   exp: { label: "exp" },
   ln: { label: "ln" },
   log: { label: "log" },
-  sqrt: { label: "√", functionType: "sqrt" },
+  sqrt: { label: "\u221a", functionType: "sqrt" },
   abs: { label: "| |", functionType: "abs" },
 };
 
@@ -185,15 +185,15 @@ function rawSlice(raw: string, start: number, end: number): string {
 
 function normalizeLeafDisplay(value: string): string {
   if (/^pi$/i.test(value)) {
-    return "π";
+    return "\u03c0";
   }
 
   if (value === "*") {
-    return "·";
+    return "\u00b7";
   }
 
   if (value === "-") {
-    return "−";
+    return "\u2212";
   }
 
   return value;
@@ -445,6 +445,11 @@ class PrettyExpressionParser {
 
   private parseIdentifier(token: Token): PrettyNode {
     const normalized = token.value.toLowerCase();
+
+    if (normalized === "pi") {
+      return makeLeaf(token.start, token.end, "\u03c0", "identifier");
+    }
+
     const meta = FUNCTION_META[normalized];
     if (!meta) {
       return makeTokenLeaf(this.raw, token);
@@ -484,14 +489,12 @@ class PrettyExpressionParser {
       args.push(this.parseExpression(new Set([",", ")"])));
     }
 
-    if (token.value.toLowerCase() === "log") {
-      if (this.current()?.type === "comma") {
-        const comma = this.consume();
-        if (comma) {
-          args.push(
-            this.atStop(closeStop) ? makePlaceholder(comma.end, "argument") : this.parseExpression(new Set([")"])),
-          );
-        }
+    if (token.value.toLowerCase() === "log" && this.current()?.type === "comma") {
+      const comma = this.consume();
+      if (comma) {
+        args.push(
+          this.atStop(closeStop) ? makePlaceholder(comma.end, "argument") : this.parseExpression(new Set([")"])),
+        );
       }
     }
 
@@ -531,9 +534,7 @@ class PrettyExpressionParser {
     }
 
     const stopValues = new Set([")"]);
-    const content = this.atStop(stopValues)
-      ? makePlaceholder(openToken.end)
-      : this.parseExpression(stopValues);
+    const content = this.atStop(stopValues) ? makePlaceholder(openToken.end) : this.parseExpression(stopValues);
 
     let closeStart: number | null = null;
     let closeEnd: number | null = null;
@@ -569,7 +570,7 @@ export function snapshotPrettyExpression(node: PrettyNode): string {
     case "leaf":
       return node.display;
     case "placeholder":
-      return "□";
+      return "\u25a1";
     case "sequence":
       return `seq(${snapshotChildren(node.children)})`;
     case "group":
