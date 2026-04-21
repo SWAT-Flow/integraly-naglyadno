@@ -95,14 +95,18 @@ export interface OverlayMetric {
 
 export interface VolumeSlice {
   x: number;
-  r: number;
+  outerR: number;
+  innerR: number;
+  section: "disk" | "washer";
 }
 
 export interface VolumePreviewData {
   a: number;
   b: number;
   sampleX: number;
-  sampleR: number;
+  sampleOuterR: number;
+  sampleInnerR: number;
+  section: "disk" | "washer";
   slices: VolumeSlice[];
 }
 

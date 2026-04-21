@@ -1,11 +1,15 @@
 import { DEFAULT_VIEW } from "../constants";
+import { estimatePreviewBounds } from "../math/bounds";
 import { clampView } from "../math/numeric";
 import type { CompiledExpression, ToolState, ViewBox } from "../types";
 
 export function estimateDefaultView(validExpressions: CompiledExpression[], tool: ToolState): ViewBox {
   const hasToolWindow = tool.mode !== "none";
-  const windowMin = hasToolWindow ? Math.min(tool.a, tool.b) : DEFAULT_VIEW.xMin;
-  const windowMax = hasToolWindow ? Math.max(tool.a, tool.b) : DEFAULT_VIEW.xMax;
+  const [previewMin, previewMax] = hasToolWindow
+    ? estimatePreviewBounds(tool.a, tool.b)
+    : [DEFAULT_VIEW.xMin, DEFAULT_VIEW.xMax];
+  const windowMin = previewMin;
+  const windowMax = previewMax;
   const focusSpan = Math.max(6, (windowMax - windowMin) * 1.8 || 6);
   const xCenter = hasToolWindow ? (windowMin + windowMax) / 2 : 0;
   const xMin = xCenter - focusSpan / 2;

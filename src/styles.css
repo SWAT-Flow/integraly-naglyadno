@@ -317,7 +317,7 @@ button {
   width: 100%;
   min-width: 0;
   max-width: 100%;
-  padding: 2px 0;
+  padding: 4px 0;
 }
 
 .select-expression-preview-compact {
@@ -330,7 +330,7 @@ button {
   font-size: 13px;
   font-weight: 600;
   line-height: 1.5;
-  padding-top: 2px;
+  padding-top: 5px;
   white-space: nowrap;
 }
 
@@ -524,12 +524,13 @@ button {
 .pretty-expression-caret {
   display: inline-block;
   width: 2px;
-  height: 1.1em;
+  height: 1.12em;
   margin: 0 -1px;
   background: #2563eb;
   border-radius: 999px;
   animation: expression-caret-blink 1s steps(1, end) infinite;
-  vertical-align: text-bottom;
+  vertical-align: baseline;
+  transform: translateY(0.08em);
 }
 
 .pretty-expression-placeholder {
@@ -560,7 +561,7 @@ button {
   min-width: 0.38em;
   font-size: 0.72em;
   line-height: 1;
-  transform: translateY(-0.34em);
+  transform: translateY(-0.4em);
   margin-left: 0.04em;
 }
 
@@ -571,11 +572,11 @@ button {
 
 .pretty-expression-fraction {
   display: inline-grid;
-  grid-template-rows: minmax(1.02em, auto) auto minmax(1.46em, auto);
+  grid-template-rows: minmax(1.08em, auto) auto minmax(1.62em, auto);
   align-items: start;
   justify-items: center;
   min-width: 1.3em;
-  row-gap: 0.02em;
+  row-gap: 0.06em;
   margin: 0 0.08em;
   vertical-align: middle;
 }
@@ -597,8 +598,8 @@ button {
 
 .pretty-expression-fraction-denominator {
   font-size: 0.82em;
-  min-height: 1.32em;
-  padding: 0.18em 0.12em 0.02em;
+  min-height: 1.48em;
+  padding: 0.24em 0.14em 0.04em;
 }
 
 .pretty-expression-fraction-line {
@@ -608,7 +609,7 @@ button {
 }
 
 .pretty-expression-fraction-denominator .pretty-expression-power-exponent {
-  transform: translateY(-0.26em);
+  transform: translateY(-0.34em);
 }
 
 .pretty-expression-function-inverse {
@@ -634,7 +635,7 @@ button {
   align-items: flex-start;
   gap: 10px;
   width: 100%;
-  min-height: 30px;
+  min-height: 36px;
   padding: 0;
   border: none;
   background: transparent;
@@ -661,7 +662,7 @@ button {
   flex-wrap: nowrap;
   overflow: visible;
   white-space: nowrap;
-  line-height: 1.34;
+  line-height: 1.42;
 }
 
 .select-expression-math .pretty-expression,

@@ -65,6 +65,7 @@ function ExpressionRowComponent({
   const deleteLabel = "Удалить выражение";
   const previewPrefix = expression.orientation === "xOfY" ? "x = " : "y = ";
   const previewSource = expression.isValid && expression.normalized ? expression.normalized : expression.text;
+  const hasContent = expression.text.trim().length > 0;
 
   const syncSelectionFromInput = () => {
     setSelection(readSelection(localInputRef.current, expression.text.length));
@@ -119,18 +120,20 @@ function ExpressionRowComponent({
                 value={expression.text}
               />
 
-              <div className={`expression-editor-display ${expression.text.trim() ? "" : "expression-editor-display-empty"}`}>
-                <button
-                  className="expression-editor-prefix"
-                  onPointerDown={(event) => {
-                    event.preventDefault();
-                    setRawSelection(0);
-                  }}
-                  type="button"
-                >
-                  {previewPrefix}
-                </button>
-                {expression.text.trim() ? (
+              <div className={`expression-editor-display ${hasContent ? "" : "expression-editor-display-empty"}`}>
+                {hasContent ? (
+                  <button
+                    className="expression-editor-prefix"
+                    onPointerDown={(event) => {
+                      event.preventDefault();
+                      setRawSelection(0);
+                    }}
+                    type="button"
+                  >
+                    {previewPrefix}
+                  </button>
+                ) : null}
+                {hasContent ? (
                   <PrettyExpression
                     className="expression-editor-pretty"
                     expression={expression.text}
@@ -159,7 +162,7 @@ function ExpressionRowComponent({
             </div>
           ) : (
             <button aria-label={editRowLabel} className="expression-display" onClick={onActivate} type="button">
-              <span className="expression-display-prefix">{previewPrefix}</span>
+              {hasContent ? <span className="expression-display-prefix">{previewPrefix}</span> : null}
               {previewSource.trim() ? (
                 <PrettyExpression className="expression-display-pretty" compact expression={previewSource} />
               ) : (

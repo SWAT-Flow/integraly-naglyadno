@@ -84,7 +84,7 @@ export function VolumePreview({ data }: VolumePreviewProps) {
       const plotWidth = size.width - padding.left - padding.right;
       const plotHeight = size.height - padding.top - padding.bottom;
       const baseY = padding.top + plotHeight * 0.52;
-      const maxRadius = Math.max(1e-6, ...data.slices.map((slice) => slice.r));
+      const maxRadius = Math.max(1e-6, ...data.slices.map((slice) => slice.outerR));
       const yScale = (plotHeight * 0.38) / maxRadius;
       const xTo = (x: number) =>
         padding.left + ((x - data.a) / Math.max(1e-9, data.b - data.a)) * plotWidth;
@@ -101,19 +101,31 @@ export function VolumePreview({ data }: VolumePreviewProps) {
       context.strokeStyle = COLORS.violet;
       context.fillStyle = "rgba(124, 58, 237, 0.12)";
       for (const slice of data.slices) {
-        const radius = rTo(slice.r);
-        const ellipseRadiusX = Math.max(1.5, radius * squash);
+        const outerRadius = rTo(slice.outerR);
+        const innerRadius = rTo(slice.innerR);
+        const ellipseRadiusX = Math.max(1.5, outerRadius * squash);
         context.beginPath();
-        context.ellipse(xTo(slice.x), baseY, ellipseRadiusX, radius, 0, 0, Math.PI * 2);
+        context.ellipse(xTo(slice.x), baseY, ellipseRadiusX, outerRadius, 0, 0, Math.PI * 2);
         context.fill();
         context.stroke();
+
+        if (slice.section === "washer" && innerRadius > 0.5) {
+          context.save();
+          context.fillStyle = "#ffffff";
+          context.strokeStyle = "rgba(217, 119, 6, 0.7)";
+          context.beginPath();
+          context.ellipse(xTo(slice.x), baseY, Math.max(1, innerRadius * squash), innerRadius, 0, 0, Math.PI * 2);
+          context.fill();
+          context.stroke();
+          context.restore();
+        }
       }
 
       const frontFactor = Math.cos(phase);
-      const drawBody = (sign: 1 | -1, dashed: boolean) => {
+      const drawBody = (sign: 1 | -1, dashed: boolean, radiusKey: "outerR" | "innerR", strokeStyle: string) => {
         context.beginPath();
         data.slices.forEach((slice, index) => {
-          const radius = rTo(slice.r) * frontFactor * sign;
+          const radius = rTo(slice[radiusKey]) * frontFactor * sign;
           const x = xTo(slice.x);
           const y = baseY - radius;
           if (index === 0) {
@@ -123,27 +135,40 @@ export function VolumePreview({ data }: VolumePreviewProps) {
           }
         });
         context.lineWidth = dashed ? 1.2 : 2;
-        context.strokeStyle = dashed ? "rgba(124, 58, 237, 0.4)" : COLORS.ink;
+        context.strokeStyle = dashed ? "rgba(124, 58, 237, 0.4)" : strokeStyle;
         context.setLineDash(dashed ? [7, 5] : []);
         context.stroke();
       };
 
-      drawBody(1, false);
-      drawBody(-1, true);
+      drawBody(1, false, "outerR", COLORS.ink);
+      drawBody(-1, true, "outerR", COLORS.ink);
+      if (data.section === "washer") {
+        drawBody(1, false, "innerR", COLORS.amber);
+        drawBody(-1, true, "innerR", COLORS.amber);
+      }
 
       const sampleX = xTo(data.sampleX);
-      const sampleR = rTo(data.sampleR);
+      const sampleOuterR = rTo(data.sampleOuterR);
+      const sampleInnerR = rTo(data.sampleInnerR);
       context.setLineDash([]);
       context.strokeStyle = COLORS.amber;
       context.fillStyle = "rgba(217, 119, 6, 0.18)";
       context.beginPath();
-      context.ellipse(sampleX, baseY, Math.max(1.5, sampleR * squash), sampleR, 0, 0, Math.PI * 2);
+      context.ellipse(sampleX, baseY, Math.max(1.5, sampleOuterR * squash), sampleOuterR, 0, 0, Math.PI * 2);
       context.fill();
       context.stroke();
+      if (data.section === "washer" && sampleInnerR > 0.5) {
+        context.fillStyle = "#ffffff";
+        context.strokeStyle = COLORS.amber;
+        context.beginPath();
+        context.ellipse(sampleX, baseY, Math.max(1, sampleInnerR * squash), sampleInnerR, 0, 0, Math.PI * 2);
+        context.fill();
+        context.stroke();
+      }
       context.fillStyle = COLORS.slate;
       context.font = "12px ui-sans-serif, system-ui, sans-serif";
       context.fillText(decodeEscapedUnicode("\u043e\u0441\u044c Ox"), size.width - 56, baseY - 10);
-      context.fillText("r = |f(x)|", sampleX + 10, baseY - sampleR - 8);
+      context.fillText(data.section === "washer" ? "R(x), r(x)" : "R(x) = |f(x)|", sampleX + 10, baseY - sampleOuterR - 8);
 
       animationId = globalThis.window.requestAnimationFrame(draw);
     };

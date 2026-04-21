@@ -69,6 +69,8 @@ export function runSelfTests(): SelfTestResult[] {
   const prettyXPowGroup = snapshotPrettyExpression(buildPrettyExpression("x^(n+1)"));
   const prettySimpleFraction = snapshotPrettyExpression(buildPrettyExpression("1/x"));
   const prettyPowerFraction = snapshotPrettyExpression(buildPrettyExpression("1/x^2"));
+  const prettyGroupedDenominatorFraction = snapshotPrettyExpression(buildPrettyExpression("1/(x^2+1)"));
+  const prettyGroupedLinearFraction = snapshotPrettyExpression(buildPrettyExpression("1/(x+1)"));
   const prettyGroupedFraction = snapshotPrettyExpression(buildPrettyExpression("(x+1)/(x-1)"));
   const prettyPi = snapshotPrettyExpression(buildPrettyExpression("pi"));
   const prettySqrt = snapshotPrettyExpression(buildPrettyExpression("sqrt(x)"));
@@ -88,6 +90,20 @@ export function runSelfTests(): SelfTestResult[] {
   const reciprocalSquaredExpression = makeCompiledExpression("reciprocal-squared-test", "1 / x^2");
   const sineExpression = makeCompiledExpression("sine-test", "sin(x)");
   const squareExpression = makeCompiledExpression("square-test", "x^2");
+  const halfLinearExpression = makeCompiledExpression("half-linear-test", "x / 2");
+  const constantOneExpression = makeCompiledExpression("constant-one-test", "1");
+  const sidewaysExpression =
+    sidewaysCompiled.ok
+      ? {
+          id: "sideways-test",
+          raw: "x=siny",
+          normalized: sidewaysCompiled.normalized,
+          visible: true,
+          color: "#2563eb",
+          orientation: sidewaysCompiled.orientation,
+          evaluate: (value: number) => evaluateCompiled(sidewaysCompiled.compiled, value, sidewaysCompiled.orientation),
+        }
+      : null;
   const signedIntegralLabel = "\u041f\u043e\u0434\u043f\u0438\u0441\u0430\u043d\u043d\u044b\u0439 \u0438\u043d\u0442\u0435\u0433\u0440\u0430\u043b";
   const geometricAreaLabel = "\u0413\u0435\u043e\u043c\u0435\u0442\u0440\u0438\u0447\u0435\u0441\u043a\u0430\u044f \u043f\u043b\u043e\u0449\u0430\u0434\u044c";
   const areaLabel = "\u041f\u043b\u043e\u0449\u0430\u0434\u044c";
@@ -105,12 +121,32 @@ export function runSelfTests(): SelfTestResult[] {
     },
     validExpressions,
   );
+  const clampedFiniteTool = normalizeTool(
+    {
+      mode: "between",
+      exprA: "missing",
+      exprB: "missing",
+      a: -5000,
+      b: 5000,
+      n: 0,
+      sample: "weird" as never,
+    },
+    validExpressions,
+  );
   const oneFunctionBetween = normalizeTool(
     { mode: "between", exprA: "missing", exprB: "missing", a: 2, b: -2, n: 1, sample: "left" },
     [validExpressions[0]],
   );
   const duplicateBetween = normalizeTool(
     { mode: "between", exprA: "f", exprB: "f", a: 0, b: 1, n: 8, sample: "mid" },
+    validExpressions,
+  );
+  const infiniteUnderTool = normalizeTool(
+    { mode: "under", exprA: "f", a: 1, b: Number.POSITIVE_INFINITY, n: 8, sample: "mid" },
+    validExpressions,
+  );
+  const volumeNoBTool = normalizeTool(
+    { mode: "volume", exprA: "f", exprB: null, a: 0, b: 2, n: 8, sample: "mid" },
     validExpressions,
   );
 
@@ -190,10 +226,61 @@ export function runSelfTests(): SelfTestResult[] {
         )
       : null;
   const volumeOverlay = buildOverlay(
-    { mode: "volume", exprA: "f", a: Number.NEGATIVE_INFINITY, b: 4000, n: 5, sample: "mid" },
+    { mode: "volume", exprA: "f", a: 0, b: 2, n: 5, sample: "mid" },
     validExpressions,
     validMap,
   );
+  const improperFiniteVolumeOverlay =
+    reciprocalExpression !== null
+      ? buildOverlay(
+          { mode: "volume", exprA: "reciprocal-test", a: 1, b: Number.POSITIVE_INFINITY, n: 5, sample: "mid" },
+          [reciprocalExpression],
+          new Map([["reciprocal-test", reciprocalExpression]]),
+        )
+      : null;
+  const divergentVolumeOverlay =
+    constantOneExpression !== null
+      ? buildOverlay(
+          { mode: "volume", exprA: "constant-one-test", a: 0, b: Number.POSITIVE_INFINITY, n: 5, sample: "mid" },
+          [constantOneExpression],
+          new Map([["constant-one-test", constantOneExpression]]),
+        )
+      : null;
+  const washersVolumeOverlay =
+    validExpressions[0] !== null && halfLinearExpression !== null
+      ? buildOverlay(
+          { mode: "volume", exprA: "f", exprB: "half-linear-test", a: 0, b: 2, n: 5, sample: "mid" },
+          [validExpressions[0], halfLinearExpression],
+          new Map([
+            ["f", validExpressions[0]],
+            ["half-linear-test", halfLinearExpression],
+          ]),
+        )
+      : null;
+  const unsupportedVolumeOverlay =
+    sidewaysExpression !== null
+      ? buildOverlay(
+          { mode: "volume", exprA: "sideways-test", a: 0, b: 2, n: 5, sample: "mid" },
+          [sidewaysExpression],
+          new Map([["sideways-test", sidewaysExpression]]),
+        )
+      : null;
+  const infiniteRiemannOverlay =
+    reciprocalExpression !== null
+      ? buildOverlay(
+          { mode: "riemann", exprA: "reciprocal-test", a: 1, b: Number.POSITIVE_INFINITY, n: 6, sample: "mid" },
+          [reciprocalExpression],
+          new Map([["reciprocal-test", reciprocalExpression]]),
+        )
+      : null;
+  const infiniteTrapOverlay =
+    reciprocalExpression !== null
+      ? buildOverlay(
+          { mode: "trap", exprA: "reciprocal-test", a: 1, b: Number.POSITIVE_INFINITY, n: 6, sample: "mid" },
+          [reciprocalExpression],
+          new Map([["reciprocal-test", reciprocalExpression]]),
+        )
+      : null;
   const averageOverlay = buildOverlay(
     { mode: "averageValue", exprA: "f", a: 0, b: 2, n: 5, sample: "mid" },
     validExpressions,
@@ -301,6 +388,14 @@ export function runSelfTests(): SelfTestResult[] {
     pass(`pretty renderer builds 1/x as a fraction`, prettySimpleFraction === "frac(1|x)"),
     pass(`pretty renderer builds 1/x^2 as fraction over a power`, prettyPowerFraction === "frac(1|pow(x|2))"),
     pass(
+      `pretty renderer builds 1/(x^2+1) as fraction with grouped denominator`,
+      prettyGroupedDenominatorFraction === "frac(1|group(seq(pow(x|2) + 1)))",
+    ),
+    pass(
+      `pretty renderer builds 1/(x+1) as fraction with grouped denominator`,
+      prettyGroupedLinearFraction === "frac(1|group(seq(x + 1)))",
+    ),
+    pass(
       `pretty renderer builds (x+1)/(x-1) as grouped fraction`,
       prettyGroupedFraction === "frac(group(seq(x + 1))|group(seq(x − 1)))",
     ),
@@ -379,13 +474,18 @@ export function runSelfTests(): SelfTestResult[] {
       normalizeTool({ mode: "newtonLeibniz" }, validExpressions).mode === "newtonLeibniz" &&
         normalizeTool({ mode: "averageValue" }, validExpressions).mode === "averageValue",
     ),
-    pass(`normalizeTool clamps a/b to [-1000, 1000]`, normalizedTool.a === -1000 && normalizedTool.b === 1000),
+    pass(`normalizeTool clamps finite a/b to [-1000, 1000]`, clampedFiniteTool.a === -1000 && clampedFiniteTool.b === 1000),
+    pass(
+      `normalizeTool preserves infinity for supported modes`,
+      infiniteUnderTool.b === Number.POSITIVE_INFINITY && infiniteUnderTool.a === 1,
+    ),
     pass(`normalizeTool enforces n >= 2`, normalizedTool.n === 2),
     pass(
       `normalizeTool keeps between mode stable with one function`,
       oneFunctionBetween.exprA === "f" && oneFunctionBetween.exprB === "f",
     ),
     pass(`normalizeTool picks the second function when exprA === exprB`, duplicateBetween.exprB === "g"),
+    pass(`normalizeTool keeps exprB optional in volume mode`, volumeNoBTool.exprB === null),
     pass(`clampView keeps x inside [-1000, 1000]`, clampedView.xMin >= -1000 && clampedView.xMax <= 1000),
     pass(`clampView shifts overflowing windows back inside bounds`, shiftedView.xMin >= -1000 && shiftedView.xMax <= 1000),
     pass(`buildOverlay does not crash with 0 functions`, emptyOverlay.metrics.length > 0),
@@ -500,6 +600,22 @@ export function runSelfTests(): SelfTestResult[] {
         reciprocalSquaredTrapOverlay.polygons.length === 0,
     ),
     pass(
+      `riemann reports infinite bounds as unsupported without preview`,
+      infiniteRiemannOverlay !== null &&
+        infiniteRiemannOverlay.metrics.some(
+          (metric) => metric.label === "Сумма Римана" && metric.value === "не поддерживается",
+        ) &&
+        infiniteRiemannOverlay.polygons.length === 0,
+    ),
+    pass(
+      `trap reports infinite bounds as unsupported without preview`,
+      infiniteTrapOverlay !== null &&
+        infiniteTrapOverlay.metrics.some(
+          (metric) => metric.label === "Трапеции" && metric.value === "не поддерживается",
+        ) &&
+        infiniteTrapOverlay.polygons.length === 0,
+    ),
+    pass(
       `riemann keeps finite ln(x) integral but hides approximation when left samples hit the singular boundary`,
       logarithmRiemannLeftOverlay !== null &&
         logarithmRiemannLeftOverlay.metrics.some(
@@ -521,11 +637,35 @@ export function runSelfTests(): SelfTestResult[] {
         ) &&
         logarithmTrapOverlay.polygons.length === 0,
     ),
+    pass(`volume overlay keeps preview for finite one-function case`, volumeOverlay.volumePreview !== null),
     pass(
-      `volume overlay clamps bad bounds and returns preview`,
-      volumeOverlay.volumePreview !== null &&
-        volumeOverlay.volumePreview.a >= -1000 &&
-        volumeOverlay.volumePreview.b <= 1000,
+      `volume supports improper finite tail for 1/x on [1,+∞)`,
+      improperFiniteVolumeOverlay !== null &&
+        improperFiniteVolumeOverlay.metrics.some(
+          (metric) => metric.label === "Объём" && metric.value !== divergentValue && metric.value !== "-",
+        ) &&
+        improperFiniteVolumeOverlay.volumePreview !== null,
+    ),
+    pass(
+      `volume marks divergent infinite case without preview`,
+      divergentVolumeOverlay !== null &&
+        divergentVolumeOverlay.metrics.some((metric) => metric.label === "Объём" && metric.value === divergentValue) &&
+        divergentVolumeOverlay.volumePreview === null,
+    ),
+    pass(
+      `volume supports washers between two explicit graphs`,
+      washersVolumeOverlay !== null &&
+        washersVolumeOverlay.metrics.some(
+          (metric) => metric.label === "Объём" && metric.value !== divergentValue && metric.value !== "-",
+        ) &&
+        washersVolumeOverlay.volumePreview?.section === "washer" &&
+        (washersVolumeOverlay.volumePreview?.sampleInnerR ?? 0) > 0,
+    ),
+    pass(
+      `volume rejects unsupported x=f(y) input without preview`,
+      unsupportedVolumeOverlay !== null &&
+        unsupportedVolumeOverlay.volumePreview === null &&
+        unsupportedVolumeOverlay.metrics.length > 0,
     ),
     pass(
       `average value overlay computes mean and returns guide line`,

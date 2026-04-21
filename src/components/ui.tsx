@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState, type PropsWithChildren, type ReactNode } from "react";
+import { formatBoundInput, parseBoundInput } from "../math/bounds";
 import type { OverlayMetric } from "../types";
 import { decodeEscapedUnicode } from "../utils/decodeEscapedUnicode";
 
@@ -191,6 +192,42 @@ export function NumberField({ label, value, onChange, step = 0.1 }: NumberFieldP
           setDraft(next);
           const parsed = Number(next);
           onChange(next.trim() === "" || Number.isNaN(parsed) ? Number.NaN : parsed);
+        }}
+      />
+    </label>
+  );
+}
+
+interface BoundFieldProps {
+  label: string;
+  value: number;
+  onChange: (value: number) => void;
+}
+
+export function BoundField({ label, value, onChange }: BoundFieldProps) {
+  const inputRef = useRef<HTMLInputElement>(null);
+  const [draft, setDraft] = useState(() => formatBoundInput(value));
+
+  useEffect(() => {
+    if (inputRef.current === globalThis.document?.activeElement) {
+      return;
+    }
+    setDraft(formatBoundInput(value));
+  }, [value]);
+
+  return (
+    <label className="field">
+      <span>{decodeEscapedUnicode(label)}</span>
+      <input
+        ref={inputRef}
+        type="text"
+        inputMode="decimal"
+        value={draft}
+        onBlur={() => setDraft(formatBoundInput(value))}
+        onChange={(event) => {
+          const next = event.target.value;
+          setDraft(next);
+          onChange(parseBoundInput(next));
         }}
       />
     </label>

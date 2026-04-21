@@ -1,4 +1,5 @@
 import { X_LIMITS } from "../constants";
+import { supportsInfiniteBounds } from "../math/bounds";
 import { asFinite, clamp } from "../math/numeric";
 import type { CompiledExpression, SampleMode, ToolMode, ToolState } from "../types";
 
@@ -14,17 +15,17 @@ const TOOL_MODES: ToolMode[] = [
 ];
 const SAMPLE_MODES: SampleMode[] = ["left", "mid", "right"];
 
-function normalizeBound(value: unknown, fallback: number): number {
+function normalizeBound(value: unknown, fallback: number, preserveInfinity: boolean): number {
   const numeric = typeof value === "number" ? value : Number(value);
 
   if (Number.isNaN(numeric)) {
     return fallback;
   }
   if (numeric === Number.POSITIVE_INFINITY) {
-    return X_LIMITS[1];
+    return preserveInfinity ? Number.POSITIVE_INFINITY : X_LIMITS[1];
   }
   if (numeric === Number.NEGATIVE_INFINITY) {
-    return X_LIMITS[0];
+    return preserveInfinity ? Number.NEGATIVE_INFINITY : X_LIMITS[0];
   }
 
   return clamp(numeric, X_LIMITS[0], X_LIMITS[1]);
@@ -64,6 +65,13 @@ export function normalizeTool(rawTool: Partial<ToolState>, validExpressions: Com
     }
   }
 
+  if (mode === "volume") {
+    exprB = rawTool.exprB && availableIds.includes(rawTool.exprB) ? rawTool.exprB : null;
+    if (exprB === exprA && availableIds.length > 1) {
+      exprB = availableIds.find((id) => id !== exprA) ?? null;
+    }
+  }
+
   if (mode === "between") {
     if (!exprA) {
       exprA = fallbackA;
@@ -76,8 +84,9 @@ export function normalizeTool(rawTool: Partial<ToolState>, validExpressions: Com
     }
   }
 
-  const a = normalizeBound(rawTool.a, -2);
-  const b = normalizeBound(rawTool.b, 2);
+  const preserveInfinity = supportsInfiniteBounds(mode);
+  const a = normalizeBound(rawTool.a, -2, preserveInfinity);
+  const b = normalizeBound(rawTool.b, 2, preserveInfinity);
   const n = Math.max(2, Math.round(asFinite(rawTool.n, 8)));
   const sample = SAMPLE_MODES.includes(rawTool.sample as SampleMode) ? (rawTool.sample as SampleMode) : "mid";
 

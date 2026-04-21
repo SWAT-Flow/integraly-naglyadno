@@ -1,10 +1,11 @@
 import { TOOL_LABELS } from "../constants";
+import { formatBoundTex } from "../math/bounds";
 import { expressionToTex, formatExpressionText } from "../math/parser";
 import type { CompiledExpression, OverlayData, ToolState } from "../types";
 import { FormulaCard } from "./FormulaCard";
 import { PrettyExpression } from "./PrettyExpression";
 import { VolumePreview } from "./VolumePreview";
-import { Card, MetricGrid, NumberField, SelectField } from "./ui";
+import { BoundField, Card, MetricGrid, NumberField, SelectField } from "./ui";
 
 interface ToolPanelProps {
   tool: ToolState;
@@ -13,17 +14,26 @@ interface ToolPanelProps {
   onChange: (patch: Partial<ToolState>) => void;
 }
 
-function expressionOptions(validExpressions: CompiledExpression[]) {
+function expressionOptions(validExpressions: CompiledExpression[], includeEmpty = false) {
+  const baseOptions = includeEmpty
+    ? [{ label: "Без второй функции", value: "" }]
+    : [];
+
   if (!validExpressions.length) {
-    return [{ label: "\u041d\u0435\u0442 \u043a\u043e\u0440\u0440\u0435\u043a\u0442\u043d\u044b\u0445 \u0444\u0443\u043d\u043a\u0446\u0438\u0439", value: "" }];
+    return includeEmpty
+      ? baseOptions
+      : [{ label: "\u041d\u0435\u0442 \u043a\u043e\u0440\u0440\u0435\u043a\u0442\u043d\u044b\u0445 \u0444\u0443\u043d\u043a\u0446\u0438\u0439", value: "" }];
   }
 
-  return validExpressions.map((expression) => ({
-    label: `${expression.orientation === "xOfY" ? "x" : "y"} = ${formatExpressionText(expression.normalized)}`,
-    value: expression.id,
-    render: <ExpressionSelectPreview expression={expression} />,
-    selectedRender: <ExpressionSelectPreview expression={expression} compact />,
-  }));
+  return [
+    ...baseOptions,
+    ...validExpressions.map((expression) => ({
+      label: `${expression.orientation === "xOfY" ? "x" : "y"} = ${formatExpressionText(expression.normalized)}`,
+      value: expression.id,
+      render: <ExpressionSelectPreview expression={expression} />,
+      selectedRender: <ExpressionSelectPreview expression={expression} compact />,
+    })),
+  ];
 }
 
 function expressionPreviewPrefix(expression: CompiledExpression | null): string {
@@ -54,8 +64,8 @@ function currentFormulaTex(tool: ToolState, validExpressions: CompiledExpression
   const expressionB = validExpressions.find((expression) => expression.id === tool.exprB) ?? null;
   const left = Math.min(tool.a, tool.b);
   const right = Math.max(tool.a, tool.b);
-  const aTex = Number.isFinite(left) ? String(left) : "a";
-  const bTex = Number.isFinite(right) ? String(right) : "b";
+  const aTex = formatBoundTex(left);
+  const bTex = formatBoundTex(right);
   const texA = expressionA ? expressionToTex(expressionA.normalized) : "f(x)";
   const texB = expressionB ? expressionToTex(expressionB.normalized) : "g(x)";
 
@@ -72,7 +82,9 @@ function currentFormulaTex(tool: ToolState, validExpressions: CompiledExpression
         tool.n - 1,
       )}} \\left.${texA}\\right|_{x=x_i} + \\left.${texA}\\right|_{x=x_${tool.n}}\\right)`;
     case "volume":
-      return `V = \\pi \\int_{${aTex}}^{${bTex}} \\left(${texA}\\right)^2\\,dx`;
+      return expressionB
+        ? `V = \\pi \\int_{${aTex}}^{${bTex}} \\left(R(x)^2-r(x)^2\\right)\\,dx`
+        : `V = \\pi \\int_{${aTex}}^{${bTex}} \\left(${texA}\\right)^2\\,dx`;
     case "newtonLeibniz":
       return `\\int_{${aTex}}^{${bTex}} ${texA}\\,dx = F(${bTex}) - F(${aTex})`;
     case "averageValue":
@@ -84,6 +96,7 @@ function currentFormulaTex(tool: ToolState, validExpressions: CompiledExpression
 
 export function ToolPanel({ tool, validExpressions, overlay, onChange }: ToolPanelProps) {
   const options = expressionOptions(validExpressions);
+  const volumeOptions = expressionOptions(validExpressions, true);
   const hasExpressions = validExpressions.length > 0;
   const formulaTex = currentFormulaTex(tool, validExpressions) ?? overlay.formulaTex;
   const formulaSteps = overlay.formulaSteps.length ? overlay.formulaSteps : formulaTex ? [formulaTex] : [];
@@ -95,7 +108,7 @@ export function ToolPanel({ tool, validExpressions, overlay, onChange }: ToolPan
     tool.mode === "volume" ||
     tool.mode === "newtonLeibniz" ||
     tool.mode === "averageValue";
-  const showB = tool.mode === "between";
+  const showB = tool.mode === "between" || tool.mode === "volume";
   const showSample = tool.mode === "riemann";
   const showN = tool.mode === "riemann" || tool.mode === "trap";
   const showBounds = tool.mode !== "none";
@@ -125,18 +138,24 @@ export function ToolPanel({ tool, validExpressions, overlay, onChange }: ToolPan
 
         {showB ? (
           <SelectField
-            disabled={validExpressions.length < 2}
+            disabled={tool.mode === "between" ? validExpressions.length < 2 : !hasExpressions}
             label="\u0424\u0443\u043d\u043a\u0446\u0438\u044f B"
             onChange={(value) => onChange({ exprB: value || null })}
-            options={options}
-            value={hasExpressions ? tool.exprB ?? tool.exprA ?? options[0]?.value ?? "" : ""}
+            options={tool.mode === "volume" ? volumeOptions : options}
+            value={
+              tool.mode === "volume"
+                ? tool.exprB ?? ""
+                : hasExpressions
+                  ? tool.exprB ?? tool.exprA ?? options[0]?.value ?? ""
+                  : ""
+            }
           />
         ) : null}
 
         {showBounds ? (
           <div className="field-row">
-            <NumberField label="a" onChange={(value) => onChange({ a: value })} step={0.1} value={tool.a} />
-            <NumberField label="b" onChange={(value) => onChange({ b: value })} step={0.1} value={tool.b} />
+            <BoundField label="a" onChange={(value) => onChange({ a: value })} value={tool.a} />
+            <BoundField label="b" onChange={(value) => onChange({ b: value })} value={tool.b} />
           </div>
         ) : null}
 
