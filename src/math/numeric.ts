@@ -146,11 +146,12 @@ export function midpointIntegral(
     return 0;
   }
 
-  const step = width / segments;
+  const adaptiveSegments = Math.min(12000, Math.max(segments, Math.ceil(width * 12)));
+  const step = width / adaptiveSegments;
   let sum = 0;
   let validCount = 0;
 
-  for (let index = 0; index < segments; index += 1) {
+  for (let index = 0; index < adaptiveSegments; index += 1) {
     const x = left + step * (index + 0.5);
     const y = fn(x);
     if (!Number.isFinite(y)) {

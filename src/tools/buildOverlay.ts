@@ -275,9 +275,37 @@ function isBoundarySingular(
   boundary: number,
   oppositeBoundary: number,
 ): boolean {
+  const sampleBoundaryLimit = () => {
+    const width = Math.abs(oppositeBoundary - boundary);
+    if (width <= 1e-6) {
+      return null;
+    }
+
+    const direction = oppositeBoundary >= boundary ? 1 : -1;
+    const offsets = [width / 512, width / 1024, width / 2048, width / 4096].map((offset) => Math.max(offset, 1e-6));
+    const samples = offsets
+      .map((offset) => {
+        try {
+          return fn(boundary + direction * offset);
+        } catch {
+          return Number.NaN;
+        }
+      })
+      .filter(Number.isFinite);
+
+    if (samples.length < 3) {
+      return null;
+    }
+
+    const tail = samples.slice(-3);
+    const spread = Math.max(...tail) - Math.min(...tail);
+    const scale = Math.max(1, ...tail.map((value) => Math.abs(value)));
+    return spread < Math.max(0.02, scale * 0.03) ? tail[tail.length - 1] : null;
+  };
+
   const boundaryValue = fn(boundary);
   if (!Number.isFinite(boundaryValue)) {
-    return true;
+    return sampleBoundaryLimit() === null;
   }
 
   const width = Math.abs(oppositeBoundary - boundary);
@@ -596,7 +624,7 @@ function analyzeHalfInfiniteImproperIntegral(
   direction: 1 | -1,
 ): ImproperIntegralEstimate {
   const spanBase = Math.max(1, Math.abs(finiteBound) + 1);
-  const scales = [1, 2, 4, 8, 16, 32, 64, 128].map((factor) => factor * spanBase);
+  const scales = [1, 2, 4, 8, 16, 32, 64, 128, 256, 512].map((factor) => factor * spanBase);
   const partials: number[] = [];
   let lastEstimate: ImproperIntegralEstimate | null = null;
 
@@ -772,31 +800,51 @@ export function buildOverlay(
       }
       const snapshot = buildUnderSnapshot(fnA, a, b);
       const texA = expressionA ? expressionToTex(expressionA.normalized) : "f(x)";
-      const underFinite = estimateIsFinite(snapshot.signedIntegral) && estimateIsFinite(snapshot.geometricArea);
-      const divergenceExplanation = underFinite
+      const signedFinite = estimateIsFinite(snapshot.signedIntegral);
+      const geometricFinite = estimateIsFinite(snapshot.geometricArea);
+      const statusMessage =
+        signedFinite && geometricFinite
+          ? null
+          : signedFinite
+            ? "Подписанный improper-интеграл стабилизируется, но абсолютная площадь расходится."
+            : geometricFinite
+              ? "Геометрическая площадь стабилизируется, но подписанный improper-интеграл не подтверждён."
+              : "На выбранном интервале нет конечных значений.";
+      const divergenceExplanation = signedFinite && geometricFinite
         ? [
             ...buildImproperConvergentExplanation(snapshot.signedIntegral),
             ...(!snapshot.geometricArea.improperAtBoundary && !snapshot.geometricArea.improperInside
               ? []
               : buildImproperConvergentExplanation(snapshot.geometricArea)),
           ]
-        : snapshot.geometricArea.improperInside || snapshot.signedIntegral.improperInside
+        : signedFinite && !geometricFinite
           ? [
-              "На отрезке есть внутренняя точка разрыва, поэтому интеграл и площадь приходится рассматривать по кускам.",
-              "Хотя бы один кусок не даёт устойчивой сходимости, поэтому итог помечается как расходящийся.",
+              ...buildImproperConvergentExplanation(snapshot.signedIntegral),
+              "Подписанный improper-интеграл сходится за счёт затухающей знакопеременности хвоста.",
+              ...buildImproperFailureExplanation(snapshot.geometricArea),
             ]
-          : snapshot.geometricArea.improperAtBoundary || snapshot.signedIntegral.improperAtBoundary
+          : !signedFinite && geometricFinite
             ? [
-                "На границе интервала есть несобственная особенность, и усечённые значения не стабилизируются.",
-                "Поэтому и подписанный интеграл, и геометрическая площадь помечаются как расходящиеся.",
+                ...buildImproperFailureExplanation(snapshot.signedIntegral),
+                ...buildImproperConvergentExplanation(snapshot.geometricArea),
               ]
-            : [
-                "Численная проверка не дала устойчивой сходимости на выбранном интервале.",
-                "Поэтому безопасный итог помечается как расходящийся.",
-              ];
+            : snapshot.geometricArea.improperInside || snapshot.signedIntegral.improperInside
+              ? [
+                  "На отрезке есть внутренняя точка разрыва, поэтому интеграл и площадь приходится рассматривать по кускам.",
+                  "Хотя бы один кусок не даёт устойчивой сходимости, поэтому итог помечается как расходящийся.",
+                ]
+              : snapshot.geometricArea.improperAtBoundary || snapshot.signedIntegral.improperAtBoundary
+                ? [
+                    "На границе интервала есть несобственная особенность, и усечённые значения не стабилизируются.",
+                    "Поэтому результат помечается как расходящийся только там, где сходимость не подтверждена.",
+                  ]
+                : [
+                    "Численная проверка не дала устойчивой сходимости на выбранном интервале.",
+                    "Поэтому безопасный итог помечается как расходящийся.",
+                  ];
 
       return {
-        regions: underFinite ? snapshot.regions : [],
+        regions: geometricFinite ? snapshot.regions : [],
         polygons: [],
         polylines: [],
         points: snapshot.points,
@@ -805,25 +853,25 @@ export function buildOverlay(
           [
             {
               label: "\u041f\u043e\u0434\u043f\u0438\u0441\u0430\u043d\u043d\u044b\u0439 \u0438\u043d\u0442\u0435\u0433\u0440\u0430\u043b",
-              value: underFinite ? formatIntegralEstimate(snapshot.signedIntegral) : "расходится",
+              value: signedFinite ? formatIntegralEstimate(snapshot.signedIntegral) : "расходится",
               tone: "blue",
             },
             {
               label: "\u0413\u0435\u043e\u043c\u0435\u0442\u0440\u0438\u0447\u0435\u0441\u043a\u0430\u044f \u043f\u043b\u043e\u0449\u0430\u0434\u044c",
-              value: underFinite ? formatIntegralEstimate(snapshot.geometricArea) : "расходится",
+              value: geometricFinite ? formatIntegralEstimate(snapshot.geometricArea) : "расходится",
               tone: "emerald",
             },
             { label: "\u0418\u043d\u0442\u0435\u0440\u0432\u0430\u043b", value: formatIntervalText(a, b, 3), tone: "slate" },
             { label: "\u041a\u043e\u0440\u043d\u0438", value: String(snapshot.points.length), tone: "violet" },
           ],
-          "\u041d\u0430 \u0432\u044b\u0431\u0440\u0430\u043d\u043d\u043e\u043c \u0438\u043d\u0442\u0435\u0440\u0432\u0430\u043b\u0435 \u043d\u0435\u0442 \u043a\u043e\u043d\u0435\u0447\u043d\u044b\u0445 \u0437\u043d\u0430\u0447\u0435\u043d\u0438\u0439.",
-          !underFinite,
+          statusMessage ?? "",
+          Boolean(statusMessage),
         ),
         formulaTex: "\\int_a^b f(x)\\,dx\\quad\\text{\u0438}\\quad\\int_a^b |f(x)|\\,dx",
         formulaSteps: [
           `\\int_{${formatBoundTex(a, 3)}}^{${formatBoundTex(b, 3)}} ${texA}\\,dx`,
-          `\\int_{${formatBoundTex(a, 3)}}^{${formatBoundTex(b, 3)}} ${texA}\\,dx = ${underFinite ? integralEstimateTex(snapshot.signedIntegral) : "\\text{расходится}"}`,
-          `S_{\\text{geom}} = \\int_{${formatBoundTex(a, 3)}}^{${formatBoundTex(b, 3)}} \\left|${texA}\\right|\\,dx = ${underFinite ? integralEstimateTex(snapshot.geometricArea) : "\\text{расходится}"}`,
+          `\\int_{${formatBoundTex(a, 3)}}^{${formatBoundTex(b, 3)}} ${texA}\\,dx = ${signedFinite ? integralEstimateTex(snapshot.signedIntegral) : "\\text{расходится}"}`,
+          `S_{\\text{geom}} = \\int_{${formatBoundTex(a, 3)}}^{${formatBoundTex(b, 3)}} \\left|${texA}\\right|\\,dx = ${geometricFinite ? integralEstimateTex(snapshot.geometricArea) : "\\text{расходится}"}`,
         ],
         explanation: [
           "\u041f\u043e\u0434\u043f\u0438\u0441\u0430\u043d\u043d\u044b\u0439 \u0438\u043d\u0442\u0435\u0433\u0440\u0430\u043b \u0443\u0447\u0438\u0442\u044b\u0432\u0430\u0435\u0442, \u043b\u0435\u0436\u0438\u0442 \u043b\u0438 \u0433\u0440\u0430\u0444\u0438\u043a \u0432\u044b\u0448\u0435 \u0438\u043b\u0438 \u043d\u0438\u0436\u0435 \u043e\u0441\u0438 Ox.",

@@ -79,6 +79,7 @@ export function runSelfTests(): SelfTestResult[] {
   const prettyLn = snapshotPrettyExpression(buildPrettyExpression("ln(x)"));
   const prettyDanglingPower = snapshotPrettyExpression(buildPrettyExpression("x^"));
   const prettyDanglingFraction = snapshotPrettyExpression(buildPrettyExpression("1/"));
+  const prettyDanglingGroupedFraction = snapshotPrettyExpression(buildPrettyExpression("1/("));
   const prettyDanglingSqrt = snapshotPrettyExpression(buildPrettyExpression("sqrt("));
   const prettyDanglingSin = snapshotPrettyExpression(buildPrettyExpression("sin("));
   const prettyDanglingPowerGroup = snapshotPrettyExpression(buildPrettyExpression("x^("));
@@ -88,6 +89,8 @@ export function runSelfTests(): SelfTestResult[] {
   const logarithmExpression = makeCompiledExpression("ln-test", "ln(x)");
   const reciprocalExpression = makeCompiledExpression("reciprocal-test", "1 / x");
   const reciprocalSquaredExpression = makeCompiledExpression("reciprocal-squared-test", "1 / x^2");
+  const sincExpression = makeCompiledExpression("sinc-test", "sin(x) / x");
+  const absSincExpression = makeCompiledExpression("abs-sinc-test", "abs(sin(x) / x)");
   const sineExpression = makeCompiledExpression("sine-test", "sin(x)");
   const squareExpression = makeCompiledExpression("square-test", "x^2");
   const halfLinearExpression = makeCompiledExpression("half-linear-test", "x / 2");
@@ -349,6 +352,38 @@ export function runSelfTests(): SelfTestResult[] {
           new Map([["reciprocal-squared-test", reciprocalSquaredExpression]]),
         )
       : null;
+  const reciprocalTailUnderOverlay =
+    reciprocalExpression !== null
+      ? buildOverlay(
+          { mode: "under", exprA: "reciprocal-test", a: 1, b: Number.POSITIVE_INFINITY, n: 5, sample: "mid" },
+          [reciprocalExpression],
+          new Map([["reciprocal-test", reciprocalExpression]]),
+        )
+      : null;
+  const reciprocalSquaredTailUnderOverlay =
+    reciprocalSquaredExpression !== null
+      ? buildOverlay(
+          { mode: "under", exprA: "reciprocal-squared-test", a: 1, b: Number.POSITIVE_INFINITY, n: 5, sample: "mid" },
+          [reciprocalSquaredExpression],
+          new Map([["reciprocal-squared-test", reciprocalSquaredExpression]]),
+        )
+      : null;
+  const sincUnderOverlay =
+    sincExpression !== null
+      ? buildOverlay(
+          { mode: "under", exprA: "sinc-test", a: 0, b: Number.POSITIVE_INFINITY, n: 5, sample: "mid" },
+          [sincExpression],
+          new Map([["sinc-test", sincExpression]]),
+        )
+      : null;
+  const absSincUnderOverlay =
+    absSincExpression !== null
+      ? buildOverlay(
+          { mode: "under", exprA: "abs-sinc-test", a: 0, b: Number.POSITIVE_INFINITY, n: 5, sample: "mid" },
+          [absSincExpression],
+          new Map([["abs-sinc-test", absSincExpression]]),
+        )
+      : null;
   const allPracticeItems = LEARNING_MODULES.flatMap((module) =>
     module.sections.flatMap((section) => (section.type === "practice" ? section.items : [])),
   );
@@ -406,6 +441,7 @@ export function runSelfTests(): SelfTestResult[] {
     pass(`pretty renderer builds ln(x) as a function node`, prettyLn === "fn(ln|x)"),
     pass(`pretty renderer keeps x^ as an incomplete power`, prettyDanglingPower === "pow(x|□)"),
     pass(`pretty renderer keeps 1/ as an incomplete fraction`, prettyDanglingFraction === "frac(1|□)"),
+    pass(`pretty renderer keeps 1/( as a grouped denominator`, prettyDanglingGroupedFraction === "frac(1|group-open(□))"),
     pass(`pretty renderer keeps sqrt( as an incomplete root`, prettyDanglingSqrt === "sqrt(□)"),
     pass(`pretty renderer keeps sin( as an incomplete function call`, prettyDanglingSin === "fn(sin|□)"),
     pass(`pretty renderer keeps x^( as an open grouped exponent`, prettyDanglingPowerGroup === "pow(x|group-open(□))"),
@@ -565,6 +601,45 @@ export function runSelfTests(): SelfTestResult[] {
       reciprocalSquaredSymmetricUnderOverlay !== null &&
         reciprocalSquaredSymmetricUnderOverlay.metrics.some(
           (metric) => metric.label === geometricAreaLabel && metric.value === divergentValue,
+        ),
+    ),
+    pass(
+      `under keeps sin(x)/x on [0,+∞) finite as a signed improper integral`,
+      sincUnderOverlay !== null &&
+        sincUnderOverlay.metrics.some(
+          (metric) =>
+            metric.label === signedIntegralLabel &&
+            metric.value !== divergentValue &&
+            metric.value !== "-" &&
+            Math.abs(Number(metric.value) - Math.PI / 2) < 0.05,
+        ),
+    ),
+    pass(
+      `under marks geometric area for sin(x)/x on [0,+∞) as divergent`,
+      sincUnderOverlay !== null &&
+        sincUnderOverlay.metrics.some(
+          (metric) => metric.label === geometricAreaLabel && metric.value === divergentValue,
+        ),
+    ),
+    pass(
+      `under marks abs(sin(x)/x) on [0,+∞) as divergent`,
+      absSincUnderOverlay !== null &&
+        absSincUnderOverlay.metrics.some(
+          (metric) => metric.label === signedIntegralLabel && metric.value === divergentValue,
+        ),
+    ),
+    pass(
+      `under marks 1/x on [1,+∞) as divergent`,
+      reciprocalTailUnderOverlay !== null &&
+        reciprocalTailUnderOverlay.metrics.some(
+          (metric) => metric.label === signedIntegralLabel && metric.value === divergentValue,
+        ),
+    ),
+    pass(
+      `under keeps 1/x^2 on [1,+∞) finite`,
+      reciprocalSquaredTailUnderOverlay !== null &&
+        reciprocalSquaredTailUnderOverlay.metrics.some(
+          (metric) => metric.label === signedIntegralLabel && metric.value !== divergentValue && metric.value !== "-",
         ),
     ),
     pass(
