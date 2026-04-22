@@ -15,14 +15,10 @@ interface ToolPanelProps {
 }
 
 function expressionOptions(validExpressions: CompiledExpression[], includeEmpty = false) {
-  const baseOptions = includeEmpty
-    ? [{ label: "Без второй функции", value: "" }]
-    : [];
+  const baseOptions = includeEmpty ? [{ label: "Без второй функции", value: "" }] : [];
 
   if (!validExpressions.length) {
-    return includeEmpty
-      ? baseOptions
-      : [{ label: "\u041d\u0435\u0442 \u043a\u043e\u0440\u0440\u0435\u043a\u0442\u043d\u044b\u0445 \u0444\u0443\u043d\u043a\u0446\u0438\u0439", value: "" }];
+    return includeEmpty ? baseOptions : [{ label: "Нет корректных функций", value: "" }];
   }
 
   return [
@@ -40,6 +36,20 @@ function expressionPreviewPrefix(expression: CompiledExpression | null): string 
   return expression?.orientation === "xOfY" ? "x =" : "y =";
 }
 
+function cleanSquaredTex(tex: string): string {
+  const trimmed = tex.trim();
+  const unwrapped =
+    trimmed.startsWith("\\left(") && trimmed.endsWith("\\right)")
+      ? trimmed.slice("\\left(".length, -("\\right)".length))
+      : trimmed.startsWith("(") && trimmed.endsWith(")")
+        ? trimmed.slice(1, -1)
+        : trimmed;
+  return /^(?:[a-zA-Z0-9]+|[a-zA-Z]+\([^()]+\)|\\sqrt\{[^{}]+\}|\\log_\{[^{}]+\}\s+.+)$/.test(unwrapped) &&
+    !unwrapped.includes("^")
+    ? `${unwrapped}^2`
+    : `\\left(${unwrapped}\\right)^2`;
+}
+
 function ExpressionSelectPreview({
   expression,
   compact = false,
@@ -50,11 +60,7 @@ function ExpressionSelectPreview({
   return (
     <span className={`select-expression-preview ${compact ? "select-expression-preview-compact" : ""}`}>
       <span className="select-expression-prefix">{expressionPreviewPrefix(expression)}</span>
-      <PrettyExpression
-        className="select-expression-math"
-        compact
-        expression={expression.normalized}
-      />
+      <PrettyExpression className="select-expression-math" compact expression={expression.normalized} />
     </span>
   );
 }
@@ -75,20 +81,16 @@ function currentFormulaTex(tool: ToolState, validExpressions: CompiledExpression
     case "between":
       return null;
     case "riemann":
-      return `\\sum_{i=1}^{${tool.n}} \\left.${texA}\\right|_{x=\\xi_i}\\,\\Delta x`;
     case "trap":
-      return `\\int_{${aTex}}^{${bTex}} ${texA}\\,dx \\approx \\frac{h}{2}\\left(\\left.${texA}\\right|_{x=x_0} + 2\\sum_{i=1}^{${Math.max(
-        1,
-        tool.n - 1,
-      )}} \\left.${texA}\\right|_{x=x_i} + \\left.${texA}\\right|_{x=x_${tool.n}}\\right)`;
+      return `\\Delta x = \\frac{${bTex}-${aTex}}{${tool.n}}`;
     case "volume":
       return expressionB
         ? `V = \\pi \\int_{${aTex}}^{${bTex}} \\left(R(x)^2-r(x)^2\\right)\\,dx`
-        : `V = \\pi \\int_{${aTex}}^{${bTex}} \\left(${texA}\\right)^2\\,dx`;
+        : `V = \\pi \\int_{${aTex}}^{${bTex}} ${cleanSquaredTex(texA)}\\,dx`;
     case "newtonLeibniz":
       return `\\int_{${aTex}}^{${bTex}} ${texA}\\,dx = F(${bTex}) - F(${aTex})`;
     case "averageValue":
-      return `f_{\\text{avg}} = \\frac{1}{${bTex}-${aTex}}\\int_{${aTex}}^{${bTex}} ${texA}\\,dx`;
+      return `f_{\\text{avg}}\\,(${bTex}-${aTex}) = \\int_{${aTex}}^{${bTex}} ${texA}\\,dx`;
     default:
       return null;
   }
@@ -116,11 +118,11 @@ export function ToolPanel({ tool, validExpressions, overlay, onChange }: ToolPan
   return (
     <div className="panel-stack">
       <Card
-        title="\u0418\u043d\u0441\u0442\u0440\u0443\u043c\u0435\u043d\u0442\u044b"
-        subtitle="\u041f\u0430\u043d\u0435\u043b\u044c \u043e\u0441\u0442\u0430\u0435\u0442\u0441\u044f \u0440\u0430\u0431\u043e\u0447\u0435\u0439 \u0434\u0430\u0436\u0435 \u043f\u043e\u0441\u043b\u0435 \u0443\u0434\u0430\u043b\u0435\u043d\u0438\u044f \u0432\u044b\u0440\u0430\u0436\u0435\u043d\u0438\u0439 \u0438\u043b\u0438 \u043d\u0435\u043f\u043e\u043b\u043d\u044b\u0445 \u043d\u0430\u0441\u0442\u0440\u043e\u0435\u043a \u0440\u0435\u0436\u0438\u043c\u0430."
+        title="Инструменты"
+        subtitle="Панель остаётся рабочей даже после удаления выражений или неполных настроек режима."
       >
         <SelectField
-          label="\u0420\u0435\u0436\u0438\u043c"
+          label="Режим"
           onChange={(value) => onChange({ mode: value as ToolState["mode"] })}
           options={Object.entries(TOOL_LABELS).map(([value, label]) => ({ value, label }))}
           value={tool.mode}
@@ -129,7 +131,7 @@ export function ToolPanel({ tool, validExpressions, overlay, onChange }: ToolPan
         {showA ? (
           <SelectField
             disabled={!hasExpressions}
-            label="\u0424\u0443\u043d\u043a\u0446\u0438\u044f A"
+            label="Функция A"
             onChange={(value) => onChange({ exprA: value || null })}
             options={options}
             value={hasExpressions ? tool.exprA ?? options[0]?.value ?? "" : ""}
@@ -139,7 +141,7 @@ export function ToolPanel({ tool, validExpressions, overlay, onChange }: ToolPan
         {showB ? (
           <SelectField
             disabled={tool.mode === "between" ? validExpressions.length < 2 : !hasExpressions}
-            label="\u0424\u0443\u043d\u043a\u0446\u0438\u044f B"
+            label="Функция B"
             onChange={(value) => onChange({ exprB: value || null })}
             options={tool.mode === "volume" ? volumeOptions : options}
             value={
@@ -163,39 +165,33 @@ export function ToolPanel({ tool, validExpressions, overlay, onChange }: ToolPan
 
         {showSample ? (
           <SelectField
-            label="\u0412\u044b\u0431\u043e\u0440\u043a\u0430"
+            label="Выборка"
             onChange={(value) => onChange({ sample: value as ToolState["sample"] })}
             options={[
-              { value: "left", label: "\u0441\u043b\u0435\u0432\u0430" },
-              { value: "mid", label: "\u043f\u043e \u0446\u0435\u043d\u0442\u0440\u0443" },
-              { value: "right", label: "\u0441\u043f\u0440\u0430\u0432\u0430" },
+              { value: "left", label: "слева" },
+              { value: "mid", label: "по центру" },
+              { value: "right", label: "справа" },
             ]}
             value={tool.sample}
           />
         ) : null}
       </Card>
 
-      <Card
-        title="\u0424\u043e\u0440\u043c\u0443\u043b\u0430"
-        subtitle="\u0417\u0434\u0435\u0441\u044c \u043f\u043e\u043a\u0430\u0437\u044b\u0432\u0430\u0435\u0442\u0441\u044f \u0430\u043a\u0442\u0443\u0430\u043b\u044c\u043d\u0430\u044f \u0444\u043e\u0440\u043c\u0443\u043b\u0430 \u0434\u043b\u044f \u0432\u044b\u0431\u0440\u0430\u043d\u043d\u044b\u0445 \u0444\u0443\u043d\u043a\u0446\u0438\u0439 \u0438 \u0433\u0440\u0430\u043d\u0438\u0446."
-      >
+      <Card title="Формула" subtitle="Здесь показывается актуальная формула для выбранных функций и границ.">
         <div className="formula-stack">
           {formulaSteps.length ? formulaSteps.map((step, index) => <FormulaCard key={`${step}-${index}`} tex={step} />) : null}
         </div>
       </Card>
 
       <Card
-        title="\u041c\u0435\u0442\u0440\u0438\u043a\u0438"
-        subtitle="\u0415\u0441\u043b\u0438 \u0434\u0430\u043d\u043d\u044b\u0445 \u043d\u0435\u0434\u043e\u0441\u0442\u0430\u0442\u043e\u0447\u043d\u043e, \u0437\u0434\u0435\u0441\u044c \u043e\u0441\u0442\u0430\u0435\u0442\u0441\u044f \u043f\u043e\u043d\u044f\u0442\u043d\u043e\u0435 \u0441\u043e\u043e\u0431\u0449\u0435\u043d\u0438\u0435 \u0432\u043c\u0435\u0441\u0442\u043e \u043f\u0430\u0434\u0435\u043d\u0438\u044f \u0438\u043d\u0442\u0435\u0440\u0444\u0435\u0439\u0441\u0430."
+        title="Метрики"
+        subtitle="Если данных недостаточно, здесь остаётся понятное сообщение вместо падения интерфейса."
       >
         <MetricGrid metrics={overlay.metrics} />
       </Card>
 
       {overlay.explanation.length ? (
-        <Card
-          title="\u041f\u043e\u044f\u0441\u043d\u0435\u043d\u0438\u0435"
-          subtitle="\u041a\u043e\u0440\u043e\u0442\u043a\u043e\u0435 \u0447\u0435\u043b\u043e\u0432\u0435\u043a\u043e\u0447\u0438\u0442\u0430\u0435\u043c\u043e\u0435 \u043e\u0431\u044a\u044f\u0441\u043d\u0435\u043d\u0438\u0435 \u0432\u044b\u0431\u0440\u0430\u043d\u043d\u043e\u0433\u043e \u0440\u0435\u0436\u0438\u043c\u0430."
-        >
+        <Card title="Пояснение" subtitle="Короткое человекочитаемое объяснение выбранного режима.">
           <div className="explanation-block">
             {overlay.explanation.map((paragraph, index) => (
               <p key={`${paragraph}-${index}`}>{paragraph}</p>
@@ -206,8 +202,8 @@ export function ToolPanel({ tool, validExpressions, overlay, onChange }: ToolPan
 
       {tool.mode === "volume" ? (
         <Card
-          title="\u041f\u0440\u0435\u0434\u043f\u0440\u043e\u0441\u043c\u043e\u0442\u0440 \u043e\u0431\u044a\u0435\u043c\u0430"
-          subtitle="\u041e\u0442\u0434\u0435\u043b\u044c\u043d\u044b\u0439 \u0433\u0440\u0430\u0444\u0438\u043a \u043f\u043e\u043a\u0430\u0437\u044b\u0432\u0430\u0435\u0442 \u0432\u0440\u0430\u0449\u0435\u043d\u0438\u0435 \u043e\u0431\u043b\u0430\u0441\u0442\u0438 \u0432\u043e\u043a\u0440\u0443\u0433 \u043e\u0441\u0438 Ox."
+          title="Предпросмотр объёма"
+          subtitle="Отдельный график показывает вращение области вокруг оси Ox."
         >
           <VolumePreview data={overlay.volumePreview} />
         </Card>

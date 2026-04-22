@@ -1,4 +1,11 @@
-import { memo, useLayoutEffect, useRef, useState } from "react";
+import { memo, useEffect, useLayoutEffect, useRef, useState } from "react";
+import {
+  applyMathFieldCharacter,
+  collapseSimpleDenominatorGroups,
+  moveMathFieldSelection,
+  resolveActiveSlotPath,
+  type MathFieldSelectionState,
+} from "../math/mathFieldEditing";
 import type { ExpressionViewModel } from "../types";
 import { decodeEscapedUnicode } from "../utils/decodeEscapedUnicode";
 import { PrettyExpression } from "./PrettyExpression";
@@ -7,8 +14,10 @@ interface ExpressionRowProps {
   expression: ExpressionViewModel;
   active: boolean;
   editorRequest: number;
+  availableColors: string[];
   onActivate: () => void;
   onChange: (value: string) => void;
+  onChangeColor: (color: string) => void;
   onDelete: () => void;
   onToggleVisible: () => void;
   inputRef: (node: HTMLInputElement | null) => void;
@@ -29,19 +38,27 @@ function ExpressionRowComponent({
   expression,
   active,
   editorRequest,
+  availableColors,
   onActivate,
   onChange,
+  onChangeColor,
   onDelete,
   onToggleVisible,
   inputRef,
 }: ExpressionRowProps) {
   const [isEditing, setIsEditing] = useState(false);
+  const [paletteOpen, setPaletteOpen] = useState(false);
   const [selection, setSelection] = useState(() => ({ start: expression.text.length, end: expression.text.length }));
+  const [activeSlotPath, setActiveSlotPath] = useState<string | null>(null);
+  const rowRef = useRef<HTMLDivElement | null>(null);
   const localInputRef = useRef<HTMLInputElement | null>(null);
+  const pendingSelectionRef = useRef<MathFieldSelectionState | null>(null);
 
   useLayoutEffect(() => {
     if (!active) {
       setIsEditing(false);
+      setActiveSlotPath(null);
+      setPaletteOpen(false);
       return;
     }
 
@@ -56,22 +73,52 @@ function ExpressionRowComponent({
       return;
     }
 
-    setSelection(readSelection(input, expression.text.length));
-  }, [expression.text]);
+    const pending = pendingSelectionRef.current;
+    if (pending) {
+      input.setSelectionRange(pending.start, pending.end);
+      setSelection({ start: pending.start, end: pending.end });
+      setActiveSlotPath(resolveActiveSlotPath(expression.text, pending.end, pending.activeSlotPath));
+      pendingSelectionRef.current = null;
+      return;
+    }
 
-  const visibilityLabel = expression.visible ? "Скрыть график" : "Показать график";
-  const selectRowLabel = "Выбрать строку выражения";
-  const editRowLabel = "Редактировать выражение";
-  const deleteLabel = "Удалить выражение";
+    const nextSelection = readSelection(input, expression.text.length);
+    setSelection(nextSelection);
+    setActiveSlotPath(resolveActiveSlotPath(expression.text, nextSelection.end, activeSlotPath));
+  }, [activeSlotPath, expression.text]);
+
+  useEffect(() => {
+    if (!paletteOpen) {
+      return;
+    }
+
+    const handlePointerDown = (event: PointerEvent) => {
+      if (!rowRef.current?.contains(event.target as Node)) {
+        setPaletteOpen(false);
+      }
+    };
+
+    globalThis.document?.addEventListener("pointerdown", handlePointerDown);
+    return () => globalThis.document?.removeEventListener("pointerdown", handlePointerDown);
+  }, [paletteOpen]);
+
+  const visibilityLabel = expression.visible
+    ? "\u0421\u043a\u0440\u044b\u0442\u044c \u0433\u0440\u0430\u0444\u0438\u043a"
+    : "\u041f\u043e\u043a\u0430\u0437\u0430\u0442\u044c \u0433\u0440\u0430\u0444\u0438\u043a";
+  const selectRowLabel = "\u0412\u044b\u0431\u0440\u0430\u0442\u044c \u0441\u0442\u0440\u043e\u043a\u0443 \u0432\u044b\u0440\u0430\u0436\u0435\u043d\u0438\u044f";
+  const editRowLabel = "\u0420\u0435\u0434\u0430\u043a\u0442\u0438\u0440\u043e\u0432\u0430\u0442\u044c \u0432\u044b\u0440\u0430\u0436\u0435\u043d\u0438\u0435";
+  const deleteLabel = "\u0423\u0434\u0430\u043b\u0438\u0442\u044c \u0432\u044b\u0440\u0430\u0436\u0435\u043d\u0438\u0435";
   const previewPrefix = expression.orientation === "xOfY" ? "x = " : "y = ";
   const previewSource = expression.isValid && expression.normalized ? expression.normalized : expression.text;
   const hasContent = expression.text.trim().length > 0;
 
-  const syncSelectionFromInput = () => {
-    setSelection(readSelection(localInputRef.current, expression.text.length));
+  const syncSelectionFromInput = (raw = expression.text, preferredPath = activeSlotPath) => {
+    const nextSelection = readSelection(localInputRef.current, raw.length);
+    setSelection(nextSelection);
+    setActiveSlotPath(resolveActiveSlotPath(raw, nextSelection.end, preferredPath));
   };
 
-  const setRawSelection = (start: number, end = start) => {
+  const setRawSelection = (start: number, end = start, nextSlotPath: string | null = null) => {
     const input = localInputRef.current;
     if (!input) {
       return;
@@ -80,15 +127,24 @@ function ExpressionRowComponent({
     input.focus();
     input.setSelectionRange(start, end);
     setSelection({ start, end });
+    setActiveSlotPath(resolveActiveSlotPath(expression.text, end, nextSlotPath));
+  };
+
+  const commitStructuredEdit = (raw: string, nextState: MathFieldSelectionState) => {
+    pendingSelectionRef.current = nextState;
+    onChange(raw);
   };
 
   return (
-    <div className={`expression-row ${active ? "expression-row-active" : ""}`}>
+    <div ref={rowRef} className={`expression-row ${active ? "expression-row-active" : ""}`}>
       <div className="expression-main">
         <button
           aria-label={selectRowLabel}
           className="expression-swatch"
-          onClick={onActivate}
+          onClick={() => {
+            onActivate();
+            setPaletteOpen((current) => (active ? !current : true));
+          }}
           style={{ backgroundColor: expression.color }}
           type="button"
         />
@@ -102,19 +158,63 @@ function ExpressionRowComponent({
                   inputRef(node);
                 }}
                 className="expression-input expression-input-hidden"
-                onBlur={() => setIsEditing(false)}
+                onBlur={() => {
+                  setIsEditing(false);
+                  setActiveSlotPath(null);
+                  const collapsed = collapseSimpleDenominatorGroups(expression.text);
+                  if (collapsed !== expression.text) {
+                    onChange(collapsed);
+                  }
+                }}
                 onChange={(event) => {
-                  setSelection(readSelection(event.currentTarget, event.currentTarget.value.length));
+                  const nextSelection = readSelection(event.currentTarget, event.currentTarget.value.length);
+                  setSelection(nextSelection);
+                  setActiveSlotPath(resolveActiveSlotPath(event.currentTarget.value, nextSelection.end, activeSlotPath));
                   onChange(event.target.value);
                 }}
-                onClick={syncSelectionFromInput}
+                onClick={() => syncSelectionFromInput()}
                 onFocus={() => {
                   onActivate();
                   setIsEditing(true);
                   syncSelectionFromInput();
                 }}
-                onKeyUp={syncSelectionFromInput}
-                onSelect={syncSelectionFromInput}
+                onKeyDown={(event) => {
+                  if (event.nativeEvent.isComposing || event.ctrlKey || event.metaKey || event.altKey) {
+                    return;
+                  }
+
+                  const input = event.currentTarget;
+                  const currentState: MathFieldSelectionState = {
+                    start: input.selectionStart ?? expression.text.length,
+                    end: input.selectionEnd ?? expression.text.length,
+                    activeSlotPath,
+                  };
+
+                  if (event.key === "ArrowRight" || event.key === "ArrowLeft") {
+                    const nextState = moveMathFieldSelection(
+                      expression.text,
+                      currentState,
+                      event.key === "ArrowRight" ? "right" : "left",
+                    );
+                    if (nextState) {
+                      event.preventDefault();
+                      setRawSelection(nextState.start, nextState.end, nextState.activeSlotPath);
+                    }
+                    return;
+                  }
+
+                  if (event.key.length !== 1) {
+                    return;
+                  }
+
+                  const nextEdit = applyMathFieldCharacter(expression.text, currentState, event.key);
+                  if (nextEdit.handled) {
+                    event.preventDefault();
+                    commitStructuredEdit(nextEdit.raw, nextEdit.next);
+                  }
+                }}
+                onKeyUp={() => syncSelectionFromInput()}
+                onSelect={() => syncSelectionFromInput()}
                 spellCheck={false}
                 type="text"
                 value={expression.text}
@@ -126,7 +226,7 @@ function ExpressionRowComponent({
                     className="expression-editor-prefix"
                     onPointerDown={(event) => {
                       event.preventDefault();
-                      setRawSelection(0);
+                      setRawSelection(0, 0, null);
                     }}
                     type="button"
                   >
@@ -137,9 +237,9 @@ function ExpressionRowComponent({
                   <PrettyExpression
                     className="expression-editor-pretty"
                     expression={expression.text}
-                    onPointerDown={(rawIndex) => {
+                    onPointerDown={(target) => {
                       onActivate();
-                      setRawSelection(rawIndex);
+                      setRawSelection(target.rawIndex, target.rawIndex, target.slotPath);
                     }}
                     selectionEnd={selection.end}
                     selectionStart={selection.start}
@@ -150,7 +250,7 @@ function ExpressionRowComponent({
                     onPointerDown={(event) => {
                       event.preventDefault();
                       onActivate();
-                      setRawSelection(0);
+                      setRawSelection(0, 0, null);
                     }}
                     type="button"
                   >
@@ -166,7 +266,7 @@ function ExpressionRowComponent({
               {previewSource.trim() ? (
                 <PrettyExpression className="expression-display-pretty" compact expression={previewSource} />
               ) : (
-                <span className="expression-display-text expression-display-empty">…</span>
+                <span className="expression-display-text expression-display-empty">\u2026</span>
               )}
             </button>
           )}
@@ -179,7 +279,7 @@ function ExpressionRowComponent({
           title={visibilityLabel}
           type="button"
         >
-          {expression.visible ? "Вкл" : "Выкл"}
+          {expression.visible ? "\u0412\u043a\u043b" : "\u0412\u044b\u043a"}
         </button>
         <button
           aria-label={deleteLabel}
@@ -191,6 +291,24 @@ function ExpressionRowComponent({
           {"\u00d7"}
         </button>
       </div>
+
+      {paletteOpen ? (
+        <div className="expression-color-picker" role="listbox" aria-label="Цвет функции">
+          {availableColors.map((color) => (
+            <button
+              key={`${expression.id}-${color}`}
+              aria-label={`Выбрать цвет ${color}`}
+              className={`expression-color-option ${expression.color === color ? "expression-color-option-active" : ""}`.trim()}
+              onClick={() => {
+                onChangeColor(color);
+                setPaletteOpen(false);
+              }}
+              style={{ backgroundColor: color }}
+              type="button"
+            />
+          ))}
+        </div>
+      ) : null}
 
       {expression.error ? <div className="expression-error">{decodeEscapedUnicode(expression.error)}</div> : null}
     </div>

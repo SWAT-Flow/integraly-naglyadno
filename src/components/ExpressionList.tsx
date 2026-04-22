@@ -8,10 +8,12 @@ interface ExpressionListProps {
   expressions: ExpressionViewModel[];
   activeId: string | null;
   editorRequest: number;
+  availableColors: string[];
   inputRefs: MutableRefObject<Record<string, HTMLInputElement | null>>;
   onActivate: (id: string) => void;
   onAdd: () => void;
   onChange: (id: string, value: string) => void;
+  onChangeColor: (id: string, color: string) => void;
   onDelete: (id: string) => void;
   onToggleVisible: (id: string) => void;
 }
@@ -20,10 +22,12 @@ export function ExpressionList({
   expressions,
   activeId,
   editorRequest,
+  availableColors,
   inputRefs,
   onActivate,
   onAdd,
   onChange,
+  onChangeColor,
   onDelete,
   onToggleVisible,
 }: ExpressionListProps) {
@@ -38,6 +42,7 @@ export function ExpressionList({
           <ExpressionRow
             key={expression.id}
             active={expression.id === activeId}
+            availableColors={availableColors}
             editorRequest={editorRequest}
             expression={expression}
             inputRef={(node) => {
@@ -45,6 +50,7 @@ export function ExpressionList({
             }}
             onActivate={() => onActivate(expression.id)}
             onChange={(value) => onChange(expression.id, value)}
+            onChangeColor={(color) => onChangeColor(expression.id, color)}
             onDelete={() => onDelete(expression.id)}
             onToggleVisible={() => onToggleVisible(expression.id)}
           />

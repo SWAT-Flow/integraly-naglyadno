@@ -1,4 +1,10 @@
 import { clampView } from "../math/numeric";
+import {
+  applyMathFieldCharacter,
+  collapseSimpleDenominatorGroups,
+  moveMathFieldSelection,
+  type MathFieldSelectionState,
+} from "../math/mathFieldEditing";
 import { buildPrettyExpression, snapshotPrettyExpression } from "../math/prettyExpression";
 import { tokenizeInlineMath } from "../learning/inlineMath";
 import { LEARNING_MODULES } from "../learning/modules";
@@ -54,6 +60,19 @@ function makeCompiledExpression(id: string, text: string, color = "#2563eb"): Co
   };
 }
 
+function simulateMathFieldInput(keys: string[]) {
+  let raw = "";
+  let state: MathFieldSelectionState = { start: 0, end: 0, activeSlotPath: null };
+
+  for (const key of keys) {
+    const next = applyMathFieldCharacter(raw, state, key);
+    raw = next.raw;
+    state = next.next;
+  }
+
+  return { raw, state };
+}
+
 export function runSelfTests(): SelfTestResult[] {
   const sinCompiled = compileExpression("sin(x)");
   const sinBroken = compileExpression("sin(");
@@ -77,6 +96,8 @@ export function runSelfTests(): SelfTestResult[] {
   const prettyAbs = snapshotPrettyExpression(buildPrettyExpression("abs(x)"));
   const prettySin = snapshotPrettyExpression(buildPrettyExpression("sin(x)"));
   const prettyLn = snapshotPrettyExpression(buildPrettyExpression("ln(x)"));
+  const prettyLogBaseTwo = snapshotPrettyExpression(buildPrettyExpression("log(2, x)"));
+  const prettyLogBaseTen = snapshotPrettyExpression(buildPrettyExpression("log(10, x)"));
   const prettyDanglingPower = snapshotPrettyExpression(buildPrettyExpression("x^"));
   const prettyDanglingFraction = snapshotPrettyExpression(buildPrettyExpression("1/"));
   const prettyDanglingGroupedFraction = snapshotPrettyExpression(buildPrettyExpression("1/("));
@@ -84,11 +105,24 @@ export function runSelfTests(): SelfTestResult[] {
   const prettyDanglingSin = snapshotPrettyExpression(buildPrettyExpression("sin("));
   const prettyDanglingPowerGroup = snapshotPrettyExpression(buildPrettyExpression("x^("));
   const prettyDanglingPowerGroupSum = snapshotPrettyExpression(buildPrettyExpression("x^(n+"));
+  const typedGroupedDenominator = simulateMathFieldInput(["1", "/", "x", "^", "2", "+", "1"]);
+  const typedLinearDenominator = simulateMathFieldInput(["1", "/", "x", "+", "1"]);
+  const typedSqrtDenominator = simulateMathFieldInput(Array.from("1/sqrt(x)+1"));
+  const typedTrigDenominator = simulateMathFieldInput(Array.from("1/sin(x)+cos(x)"));
+  const typedSimpleFraction = simulateMathFieldInput(["1", "/", "x", "^", "2"]);
+  const typedEPi = simulateMathFieldInput(["e", "p", "i"]);
+  const typedPiPi = simulateMathFieldInput(["p", "i", "p", "i"]);
+  const exponentExit = moveMathFieldSelection(typedSimpleFraction.raw, typedSimpleFraction.state, "right");
+  const denominatorExit = exponentExit ? moveMathFieldSelection(typedSimpleFraction.raw, exponentExit, "right") : null;
+  const outsidePlus = denominatorExit ? applyMathFieldCharacter(typedSimpleFraction.raw, denominatorExit, "+") : null;
+  const outsideOne = outsidePlus ? applyMathFieldCharacter(outsidePlus.raw, outsidePlus.next, "1") : null;
+  const collapsedOutsideSum = outsideOne ? collapseSimpleDenominatorGroups(outsideOne.raw) : null;
   const validExpressions = [makeExpression("f", (x) => x), makeExpression("g", (x) => x * x)];
   const validMap = new Map(validExpressions.map((expression) => [expression.id, expression]));
   const logarithmExpression = makeCompiledExpression("ln-test", "ln(x)");
   const reciprocalExpression = makeCompiledExpression("reciprocal-test", "1 / x");
   const reciprocalSquaredExpression = makeCompiledExpression("reciprocal-squared-test", "1 / x^2");
+  const reciprocalCubedExpression = makeCompiledExpression("reciprocal-cubed-test", "1 / x^3");
   const sincExpression = makeCompiledExpression("sinc-test", "sin(x) / x");
   const absSincExpression = makeCompiledExpression("abs-sinc-test", "abs(sin(x) / x)");
   const sineExpression = makeCompiledExpression("sine-test", "sin(x)");
@@ -310,6 +344,14 @@ export function runSelfTests(): SelfTestResult[] {
     validExpressions,
     validMap,
   );
+  const newtonReciprocalCubedOverlay =
+    reciprocalCubedExpression !== null
+      ? buildOverlay(
+          { mode: "newtonLeibniz", exprA: "reciprocal-cubed-test", a: 0.1, b: 3, n: 5, sample: "mid" },
+          [reciprocalCubedExpression],
+          new Map([["reciprocal-cubed-test", reciprocalCubedExpression]]),
+        )
+      : null;
   const clampedView = clampView({ xMin: -5000, xMax: 5000, yMin: -3, yMax: 3 });
   const shiftedView = clampView({ xMin: 995, xMax: 1005, yMin: -1, yMax: 1 });
   const logarithmUnderOverlay =
@@ -439,6 +481,8 @@ export function runSelfTests(): SelfTestResult[] {
     pass(`pretty renderer builds abs(x) as modulus`, prettyAbs === "abs(x)"),
     pass(`pretty renderer builds sin(x) as a function node`, prettySin === "fn(sin|x)"),
     pass(`pretty renderer builds ln(x) as a function node`, prettyLn === "fn(ln|x)"),
+    pass(`pretty renderer builds log(2, x) with visible base`, prettyLogBaseTwo === "logbase(2|x)"),
+    pass(`pretty renderer builds log(10, x) with visible base`, prettyLogBaseTen === "logbase(10|x)"),
     pass(`pretty renderer keeps x^ as an incomplete power`, prettyDanglingPower === "pow(x|□)"),
     pass(`pretty renderer keeps 1/ as an incomplete fraction`, prettyDanglingFraction === "frac(1|□)"),
     pass(`pretty renderer keeps 1/( as a grouped denominator`, prettyDanglingGroupedFraction === "frac(1|group-open(□))"),
@@ -457,6 +501,25 @@ export function runSelfTests(): SelfTestResult[] {
     pass(`parseExpressionInputText restores superscripts`, parseExpressionInputText("x\u00b2") === "x^2"),
     pass(`parseExpressionInputText restores exponent placeholder`, parseExpressionInputText("x\u200a") === "x^"),
     pass(`parseExpressionInputText restores simple fraction`, parseExpressionInputText("\u00b9\u2044\u2093") === "1/x"),
+    pass(`slot-aware input keeps 1 / x ^ 2 + 1 inside the denominator`, typedGroupedDenominator.raw === "1/(x^2+1)"),
+    pass(`slot-aware input keeps 1 / x + 1 inside the denominator`, typedLinearDenominator.raw === "1/(x+1)"),
+    pass(`slot-aware input keeps 1 / sqrt(x) + 1 inside the denominator`, typedSqrtDenominator.raw === "1/(sqrt(x)+1)"),
+    pass(`slot-aware input keeps 1 / sin(x) + cos(x) inside the denominator`, typedTrigDenominator.raw === "1/(sin(x)+cos(x))"),
+    pass(`slot-aware input separates e and pi into distinct tokens`, typedEPi.raw === "e*pi"),
+    pass(`slot-aware input separates pi and pi into distinct tokens`, typedPiPi.raw === "pi*pi"),
+    pass(
+      `arrow right exits exponent before leaving the denominator`,
+      exponentExit?.activeSlotPath === "root/den" && denominatorExit?.activeSlotPath === null,
+    ),
+    pass(
+      `explicit exit from denominator allows external +1`,
+      collapsedOutsideSum === "1/x^2+1",
+    ),
+    pass(
+      `arrow left re-enters the exponent before leaving the fraction`,
+      moveMathFieldSelection(typedSimpleFraction.raw, exponentExit ?? typedSimpleFraction.state, "left")?.activeSlotPath ===
+        "root/den/content/exp",
+    ),
     pass(
       `formatExpressionText renders sqrt(x) as root with brackets`,
       formatExpressionText("sqrt(x)") === "\u221a(x)",
@@ -495,6 +558,13 @@ export function runSelfTests(): SelfTestResult[] {
     pass(
       `compileExpression supports log(base, x)`,
       logCompiled.ok ? Math.abs(evaluateCompiled(logCompiled.compiled, 0) - 3) < 1e-6 : false,
+    ),
+    pass(
+      `compileExpression supports lg(x)`,
+      (() => {
+        const compiled = compileExpression("lg(x)");
+        return compiled.ok ? Math.abs(evaluateCompiled(compiled.compiled, 100) - 2) < 1e-6 : false;
+      })(),
     ),
     pass(
       `compileExpression supports sec and asinh`,
@@ -714,6 +784,10 @@ export function runSelfTests(): SelfTestResult[] {
     ),
     pass(`volume overlay keeps preview for finite one-function case`, volumeOverlay.volumePreview !== null),
     pass(
+      `volume preview uses enough slices to avoid a coarse square-like body`,
+      (volumeOverlay.volumePreview?.slices.length ?? 0) >= 64,
+    ),
+    pass(
       `volume supports improper finite tail for 1/x on [1,+∞)`,
       improperFiniteVolumeOverlay !== null &&
         improperFiniteVolumeOverlay.metrics.some(
@@ -773,10 +847,31 @@ export function runSelfTests(): SelfTestResult[] {
         reciprocalSquaredAverageOverlay.formulaSteps.every((step) => !step.includes("\\frac{\\text{расходится}}")),
     ),
     pass(
+      `average value formula emphasizes f_avg(b-a)=integral`,
+      averageOverlay.formulaSteps.some((step) => step.includes("f_{\\text{avg}}") && step.includes("\\int")) &&
+        averageOverlay.formulaSteps.every((step) => !step.includes("\\frac{1}{")),
+    ),
+    pass(
       `newton-leibniz overlay stays safe and returns formula steps`,
       newtonOverlay.metrics.length > 0 &&
         newtonOverlay.formulaSteps.length >= 2 &&
         newtonOverlay.explanation.length > 0,
+    ),
+    pass(
+      `newton-leibniz shows an explicit primitive for simple reciprocal powers`,
+      newtonReciprocalCubedOverlay !== null &&
+        newtonReciprocalCubedOverlay.formulaSteps[0]?.includes("F(x)") &&
+        newtonReciprocalCubedOverlay.formulaSteps.some((step) => step.includes("\\frac")),
+    ),
+    pass(
+      `riemann formula steps avoid abstract I`,
+      riemannOverlay.formulaSteps.every((step) => !step.includes(" I")) &&
+        riemannOverlay.formulaSteps.every((step) => !step.includes("\\sum")),
+    ),
+    pass(
+      `trap formula steps avoid abstract I`,
+      trapOverlay.formulaSteps.every((step) => !step.includes(" I")) &&
+        trapOverlay.formulaSteps.every((step) => !step.includes("\\sum")),
     ),
     pass(`learning registry contains exactly 10 modules`, LEARNING_MODULES.length === 10),
     pass(

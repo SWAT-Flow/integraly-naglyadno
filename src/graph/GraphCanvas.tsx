@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { IconButton } from "../components/ui";
 import { COLORS } from "../constants";
-import { clamp, clampView, niceStep } from "../math/numeric";
+import { clamp, clampView, findRoots, niceStep } from "../math/numeric";
 import { formatExpressionText } from "../math/parser";
 import { decodeEscapedUnicode } from "../utils/decodeEscapedUnicode";
 import type {
@@ -33,13 +33,79 @@ interface PlotGeometry {
   plotHeight: number;
 }
 
+interface AutoIntersectionPoint extends GraphPoint {
+  key: string;
+  hoverLabel: string;
+}
+
 function formatTick(value: number): string {
   if (!Number.isFinite(value)) {
     return "";
   }
 
-  const digits = Math.abs(value) >= 100 ? 0 : Math.abs(value) >= 10 ? 1 : 2;
+  const abs = Math.abs(value);
+  if ((abs >= 1e5 || (abs > 0 && abs < 1e-4)) && abs !== 0) {
+    return value
+      .toExponential(2)
+      .replace(/\.?0+e/, "e")
+      .replace("e+", "e");
+  }
+
+  const digits = abs >= 1000 ? 0 : abs >= 100 ? 0 : abs >= 10 ? 1 : abs >= 1 ? 2 : 3;
   return value.toFixed(digits).replace(/\.?0+$/, "");
+}
+
+function formatCoordinate(value: number): string {
+  const abs = Math.abs(value);
+  const digits = abs >= 100 ? 2 : abs >= 10 ? 3 : 4;
+  return value.toFixed(digits).replace(/\.?0+$/, "");
+}
+
+function buildAutoIntersectionPoints(expressions: CompiledExpression[], view: ViewBox, limit = 10): AutoIntersectionPoint[] {
+  const yExpressions = expressions.filter((expression) => expression.orientation === "yOfX");
+  const points: AutoIntersectionPoint[] = [];
+
+  for (let leftIndex = 0; leftIndex < yExpressions.length; leftIndex += 1) {
+    for (let rightIndex = leftIndex + 1; rightIndex < yExpressions.length; rightIndex += 1) {
+      const leftExpression = yExpressions[leftIndex];
+      const rightExpression = yExpressions[rightIndex];
+      const roots = findRoots(
+        (x) => leftExpression.evaluate(x) - rightExpression.evaluate(x),
+        view.xMin,
+        view.xMax,
+        960,
+      );
+
+      for (const x of roots) {
+        const y = leftExpression.evaluate(x);
+        if (!Number.isFinite(y)) {
+          continue;
+        }
+
+        const exists = points.some(
+          (point) => Math.abs(point.x - x) < 1e-4 && Math.abs(point.y - y) < 1e-4,
+        );
+        if (exists) {
+          continue;
+        }
+
+        points.push({
+          key: `${leftExpression.id}-${rightExpression.id}-${x.toFixed(6)}`,
+          x,
+          y,
+          color: COLORS.violet,
+          radius: 4.2,
+          hoverLabel: `(${formatCoordinate(x)}, ${formatCoordinate(y)})`,
+        });
+
+        if (points.length >= limit) {
+          return points;
+        }
+      }
+    }
+  }
+
+  return points;
 }
 
 function drawPolygon(
@@ -398,9 +464,24 @@ export function GraphCanvas({ expressions, overlay, defaultView, viewResetToken 
   const [size, setSize] = useState<CanvasSize>({ width: 900, height: 520 });
   const [view, setView] = useState<ViewBox>(() => clampView(defaultView));
   const [dragging, setDragging] = useState(false);
+  const [hoveredIntersectionKey, setHoveredIntersectionKey] = useState<string | null>(null);
   const dragRef = useRef<{ pointerId: number; startX: number; startY: number; startView: ViewBox } | null>(null);
 
   const normalizedDefaultView = useMemo(() => clampView(defaultView), [defaultView]);
+  const autoIntersections = useMemo(() => buildAutoIntersectionPoints(expressions, view), [expressions, view]);
+  const displayPoints = useMemo(() => {
+    const points = [...overlay.points, ...autoIntersections];
+    if (!hoveredIntersectionKey) {
+      return points;
+    }
+
+    return points.map((point) => {
+      const autoPoint = point as Partial<AutoIntersectionPoint>;
+      return autoPoint.key === hoveredIntersectionKey && typeof autoPoint.hoverLabel === "string"
+        ? { ...point, label: autoPoint.hoverLabel }
+        : point;
+    });
+  }, [autoIntersections, hoveredIntersectionKey, overlay.points]);
 
   useEffect(() => {
     setView(normalizedDefaultView);
@@ -532,10 +613,10 @@ export function GraphCanvas({ expressions, overlay, defaultView, viewResetToken 
       context.restore();
     });
 
-    drawPoints(context, overlay.points, view, size, geometry, toX, toY);
+    drawPoints(context, displayPoints, view, size, geometry, toX, toY);
     drawVerticals(context, overlay.verticals, view, size, geometry, toX);
     context.restore();
-  }, [expressions, overlay, size.height, size.width, view]);
+  }, [displayPoints, expressions, overlay, size.height, size.width, view]);
 
   const screenToWorld = (clientX: number, clientY: number) => {
     const rect = canvasRef.current?.getBoundingClientRect();
@@ -614,12 +695,27 @@ export function GraphCanvas({ expressions, overlay, defaultView, viewResetToken 
             startY: event.clientY,
             startView: view,
           };
+          setHoveredIntersectionKey(null);
           canvas.setPointerCapture(event.pointerId);
           setDragging(true);
         }}
         onPointerMove={(event) => {
           const drag = dragRef.current;
           if (!drag || drag.pointerId !== event.pointerId) {
+            const rect = canvasRef.current?.getBoundingClientRect();
+            if (!rect || dragging) {
+              return;
+            }
+
+            const nearest = autoIntersections.find((point) => {
+              const padding = { top: 18, right: 20, bottom: 32, left: 52 };
+              const plotWidth = size.width - 72;
+              const plotHeight = size.height - 50;
+              const pointX = padding.left + ((point.x - view.xMin) / (view.xMax - view.xMin)) * plotWidth;
+              const pointY = padding.top + ((view.yMax - point.y) / (view.yMax - view.yMin)) * plotHeight;
+              return Math.hypot(pointX - (event.clientX - rect.left), pointY - (event.clientY - rect.top)) <= 10;
+            });
+            setHoveredIntersectionKey(nearest?.key ?? null);
             return;
           }
 
@@ -638,6 +734,7 @@ export function GraphCanvas({ expressions, overlay, defaultView, viewResetToken 
         }}
         onPointerUp={(event) => releaseDrag(event.pointerId)}
         onPointerCancel={(event) => releaseDrag(event.pointerId)}
+        onPointerLeave={() => setHoveredIntersectionKey(null)}
         onLostPointerCapture={() => releaseDrag()}
         onWheel={(event) => {
           event.preventDefault();

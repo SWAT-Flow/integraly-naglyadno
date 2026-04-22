@@ -308,6 +308,7 @@ export default function App() {
           <aside className="left-column">
             <ExpressionList
               activeId={activeId}
+              availableColors={PALETTE}
               editorRequest={editorRequest}
               expressions={expressionState.rows}
               inputRefs={inputRefs}
@@ -328,6 +329,12 @@ export default function App() {
                 clearViewOverride();
                 setExpressions((current) =>
                   current.map((expression) => (expression.id === id ? { ...expression, text: value } : expression)),
+                );
+              }}
+              onChangeColor={(id, color) => {
+                clearViewOverride();
+                setExpressions((current) =>
+                  current.map((expression) => (expression.id === id ? { ...expression, color } : expression)),
                 );
               }}
               onDelete={(id) => {

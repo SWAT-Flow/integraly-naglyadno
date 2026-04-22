@@ -1,5 +1,6 @@
 ﻿import { COLORS } from "../constants";
 import { estimatePreviewBounds, formatBoundTex, formatBoundText, formatIntervalText, hasInfiniteBounds, orderBounds } from "../math/bounds";
+import { all, create } from "mathjs";
 import { buildIntervals, findRoots, findSingularityCandidates, midpointIntegral, sortAB, uniqueSorted } from "../math/numeric";
 import { expressionToTex, formatExpressionText } from "../math/parser";
 import type {
@@ -14,6 +15,8 @@ import type {
 } from "../types";
 import { normalizeTool } from "./normalizeTool";
 
+const symbolicMath = create(all, {});
+
 function formatNumber(value: number, digits = 5): string {
   if (!Number.isFinite(value)) {
     return "-";
@@ -21,6 +24,251 @@ function formatNumber(value: number, digits = 5): string {
 
   const normalized = value.toFixed(digits).replace(/\.?0+$/, "");
   return normalized === "-0" ? "0" : normalized;
+}
+
+function stripOuterTexParens(tex: string): string {
+  const trimmed = tex.trim();
+  if (trimmed.startsWith("\\left(") && trimmed.endsWith("\\right)")) {
+    return trimmed.slice("\\left(".length, -("\\right)".length));
+  }
+  if (trimmed.startsWith("(") && trimmed.endsWith(")")) {
+    return trimmed.slice(1, -1);
+  }
+  return trimmed;
+}
+
+function simpleSquaredBase(tex: string): boolean {
+  const candidate = stripOuterTexParens(tex);
+  if (!candidate || candidate.includes("^")) {
+    return false;
+  }
+
+  return /^(?:[a-zA-Z0-9]+|[a-zA-Z]+\([^()]+\)|\\sqrt\{[^{}]+\}|\\log_\{[^{}]+\}\s+.+|\\(?:sin|cos|tan|sec|csc|cot|sinh|cosh|tanh|ln|lg|exp)\s+.+)$/.test(
+    candidate,
+  );
+}
+
+function squareTex(tex: string): string {
+  const candidate = stripOuterTexParens(tex);
+  return simpleSquaredBase(candidate) ? `${candidate}^2` : `\\left(${candidate}\\right)^2`;
+}
+
+function differenceOfSquaresTex(outerTex: string, innerTex: string): string {
+  const outerSquared = squareTex(outerTex);
+  const innerSquared = innerTex.trim() === "0" ? "0" : squareTex(innerTex);
+  return `${outerSquared} - ${innerSquared}`;
+}
+
+function volumeSliceCount(left: number, right: number): number {
+  const span = Math.abs(right - left);
+  if (!Number.isFinite(span) || span <= 0) {
+    return 108;
+  }
+
+  return Math.max(96, Math.min(220, Math.round(span * 18) + 60));
+}
+
+function isSimpleTexAtom(tex: string): boolean {
+  return /^(?:[a-zA-Z0-9]+|\\[a-zA-Z]+(?:\{[^{}]+\})?)$/.test(tex.trim());
+}
+
+function wrapTexGroup(tex: string): string {
+  return isSimpleTexAtom(tex) ? tex : `\\left(${tex}\\right)`;
+}
+
+function reciprocalPowerPrimitiveTex(coefficientTex: string, power: number): string {
+  const denominatorPower = power - 1;
+  const xPart = denominatorPower === 1 ? "x" : `x^${denominatorPower}`;
+  if (coefficientTex === "1") {
+    return denominatorPower === 1 ? `-\\frac{1}{x}` : `-\\frac{1}{${denominatorPower}${xPart}}`;
+  }
+  if (coefficientTex === "-1") {
+    return denominatorPower === 1 ? `\\frac{1}{x}` : `\\frac{1}{${denominatorPower}${xPart}}`;
+  }
+  return denominatorPower === 1
+    ? `-\\frac{${coefficientTex}}{x}`
+    : `-\\frac{${coefficientTex}}{${denominatorPower}${xPart}}`;
+}
+
+function mathNodeConstantTex(node: any): string | null {
+  if (!node) {
+    return null;
+  }
+
+  if (node.type === "ConstantNode") {
+    const value = Number(node.value);
+    return Number.isFinite(value) ? formatNumber(value) : null;
+  }
+
+  if (node.type === "SymbolNode" && (node.name === "pi" || node.name === "e")) {
+    return node.name === "pi" ? "\\pi" : "e";
+  }
+
+  if (node.type === "OperatorNode" && node.fn === "unaryMinus" && node.args?.length === 1) {
+    const inner = mathNodeConstantTex(node.args[0]);
+    return inner ? (inner.startsWith("-") ? inner.slice(1) : `-${inner}`) : null;
+  }
+
+  return null;
+}
+
+function joinCoefficientAndPrimitive(coefficientTex: string, primitiveTex: string): string {
+  if (coefficientTex === "1") {
+    return primitiveTex;
+  }
+  if (coefficientTex === "-1") {
+    return `-${wrapTexGroup(primitiveTex)}`;
+  }
+  return `${coefficientTex}${wrapTexGroup(primitiveTex)}`;
+}
+
+function elementaryAntiderivativeTex(expression: string): string | null {
+  const integrateNode = (node: any): string | null => {
+    if (!node) {
+      return null;
+    }
+
+    if (node.type === "ConstantNode") {
+      const constantTex = mathNodeConstantTex(node);
+      return constantTex ? `${constantTex}x` : null;
+    }
+
+    if (node.type === "SymbolNode") {
+      if (node.name === "x") {
+        return "\\frac{x^2}{2}";
+      }
+      if (node.name === "pi" || node.name === "e") {
+        return `${mathNodeConstantTex(node)}x`;
+      }
+      return null;
+    }
+
+    if (node.type === "ParenthesisNode") {
+      return integrateNode(node.content);
+    }
+
+    if (node.type === "OperatorNode") {
+      if (node.fn === "add" || node.fn === "subtract") {
+        const left = integrateNode(node.args?.[0]);
+        const right = integrateNode(node.args?.[1]);
+        if (!left || !right) {
+          return null;
+        }
+        return node.fn === "add" ? `${left} + ${right}` : `${left} - ${right}`;
+      }
+
+      if (node.fn === "unaryMinus") {
+        const inner = integrateNode(node.args?.[0]);
+        return inner ? `-${wrapTexGroup(inner)}` : null;
+      }
+
+      if (node.fn === "multiply") {
+        const leftConstant = mathNodeConstantTex(node.args?.[0]);
+        const rightConstant = mathNodeConstantTex(node.args?.[1]);
+        if (leftConstant) {
+          const inner = integrateNode(node.args?.[1]);
+          return inner ? joinCoefficientAndPrimitive(leftConstant, inner) : null;
+        }
+        if (rightConstant) {
+          const inner = integrateNode(node.args?.[0]);
+          return inner ? joinCoefficientAndPrimitive(rightConstant, inner) : null;
+        }
+      }
+
+      if (node.fn === "divide") {
+        const numeratorConstant = mathNodeConstantTex(node.args?.[0]);
+        const denominator = node.args?.[1];
+        if (numeratorConstant && denominator?.type === "SymbolNode" && denominator.name === "x") {
+          return numeratorConstant === "1"
+            ? "\\ln\\left|x\\right|"
+            : numeratorConstant === "-1"
+              ? "-\\ln\\left|x\\right|"
+              : `${numeratorConstant}\\ln\\left|x\\right|`;
+        }
+        if (
+          numeratorConstant &&
+          denominator?.type === "OperatorNode" &&
+          denominator.fn === "pow" &&
+          denominator.args?.[0]?.type === "SymbolNode" &&
+          denominator.args[0].name === "x" &&
+          denominator.args?.[1]?.type === "ConstantNode"
+        ) {
+          const power = Number(denominator.args[1].value);
+          if (Number.isFinite(power) && power > 1 && Math.abs(power - Math.round(power)) < 1e-9) {
+            return reciprocalPowerPrimitiveTex(numeratorConstant, Math.round(power));
+          }
+        }
+      }
+
+      if (
+        node.fn === "pow" &&
+        node.args?.[0]?.type === "SymbolNode" &&
+        node.args[0].name === "x" &&
+        node.args?.[1]?.type === "ConstantNode"
+      ) {
+        const exponent = Number(node.args[1].value);
+        if (!Number.isFinite(exponent)) {
+          return null;
+        }
+        if (Math.abs(exponent + 1) < 1e-9) {
+          return "\\ln\\left|x\\right|";
+        }
+        const nextExponent = exponent + 1;
+        if (Math.abs(nextExponent - 1) < 1e-9) {
+          return "x";
+        }
+        return `\\frac{x^{${formatNumber(nextExponent)}}}{${formatNumber(nextExponent)}}`;
+      }
+
+      if (
+        node.fn === "pow" &&
+        node.args?.[0]?.type === "ConstantNode" &&
+        node.args?.[1]?.type === "SymbolNode" &&
+        node.args[1].name === "x"
+      ) {
+        const base = Number(node.args[0].value);
+        if (Number.isFinite(base) && base > 0 && Math.abs(base - 1) > 1e-9) {
+          return `\\frac{${formatNumber(base)}^x}{\\ln ${formatNumber(base)}}`;
+        }
+      }
+    }
+
+    if (node.type === "FunctionNode" && node.args?.length === 1) {
+      const argument = node.args[0];
+      if (argument?.type !== "SymbolNode" || argument.name !== "x") {
+        return null;
+      }
+
+      switch (node.name) {
+        case "sin":
+          return "-\\cos x";
+        case "cos":
+          return "\\sin x";
+        case "exp":
+          return "e^x";
+        case "ln":
+          return "x\\ln x - x";
+        default:
+          return null;
+      }
+    }
+
+    return null;
+  };
+
+  try {
+    return integrateNode(symbolicMath.parse(expression));
+  } catch {
+    return null;
+  }
+}
+
+function compactVolumeSegmentSteps(segmentSteps: string[]): string[] {
+  if (segmentSteps.length <= 4) {
+    return segmentSteps;
+  }
+
+  return [segmentSteps[0], "\\text{Остальное техническое разбиение скрыто и учтено во внутреннем расчёте}"];
 }
 
 function emptyOverlay(message: string, metrics: OverlayMetric[] = []): OverlayData {
@@ -1087,9 +1335,8 @@ export function buildOverlay(
             { label: "\u0418\u043d\u0442\u0435\u0440\u0432\u0430\u043b", value: formatIntervalText(a, b, 3), tone: "slate" },
             statusMetric("\u0411\u0435\u0441\u043a\u043e\u043d\u0435\u0447\u043d\u044b\u0435 \u0433\u0440\u0430\u043d\u0438\u0446\u044b \u0432 \u0442\u0435\u043a\u0443\u0449\u0435\u043c \u0440\u0435\u0436\u0438\u043c\u0435 \u0441\u0443\u043c\u043c \u0420\u0438\u043c\u0430\u043d\u0430 \u043d\u0435 \u043f\u043e\u0434\u0434\u0435\u0440\u0436\u0438\u0432\u0430\u044e\u0442\u0441\u044f."),
           ],
-          formulaTex: "S_n = \\sum_{i=1}^{n} f(\\xi_i)\\,\\Delta x",
+          formulaTex: "\\text{Бесконечные границы в текущем режиме не поддерживаются}",
           formulaSteps: [
-            "S_n = \\sum_{i=1}^{n} f(\\xi_i)\\,\\Delta x",
             "\\text{Бесконечные границы в текущем режиме не поддерживаются}",
           ],
           explanation: [
@@ -1147,11 +1394,10 @@ export function buildOverlay(
             { label: "\u0412\u044b\u0431\u043e\u0440\u043a\u0430", value: tool.sample, tone: "violet" },
             { label: "\u0421\u0442\u0430\u0442\u0443\u0441", value: "\u041d\u0430 \u0438\u043d\u0442\u0435\u0440\u0432\u0430\u043b\u0435 \u043d\u0435\u0442 \u043a\u043e\u0440\u0440\u0435\u043a\u0442\u043d\u043e\u0433\u043e \u043a\u043e\u043d\u0435\u0447\u043d\u043e\u0433\u043e \u0438\u043d\u0442\u0435\u0433\u0440\u0430\u043b\u0430.", tone: "slate" },
           ],
-          formulaTex: "S_n = \\sum_{i=1}^{n} f(\\xi_i)\\,\\Delta x",
+          formulaTex: `\\int_{${formatNumber(a, 3)}}^{${formatNumber(b, 3)}} ${texA}\\,dx = \\text{расходится}`,
           formulaSteps: [
-            "S_n = \\sum_{i=1}^{n} f(\\xi_i)\\,\\Delta x",
             `\\int_{${formatNumber(a, 3)}}^{${formatNumber(b, 3)}} ${texA}\\,dx = \\text{расходится}`,
-            "S_n \\text{ не даёт корректного конечного результата на этом интервале}",
+            "\\text{Численная сумма не даёт корректного конечного результата на этом интервале}",
           ],
           explanation: [
             "\u0421\u0443\u043c\u043c\u0430 \u0420\u0438\u043c\u0430\u043d\u0430 \u0438\u043c\u0435\u0435\u0442 \u0441\u043c\u044b\u0441\u043b \u043a\u0430\u043a \u043f\u0440\u0438\u0431\u043b\u0438\u0436\u0435\u043d\u0438\u0435 \u0441\u0443\u0449\u0435\u0441\u0442\u0432\u0443\u044e\u0449\u0435\u0433\u043e \u043a\u043e\u043d\u0435\u0447\u043d\u043e\u0433\u043e \u0438\u043d\u0442\u0435\u0433\u0440\u0430\u043b\u0430.",
@@ -1180,11 +1426,11 @@ export function buildOverlay(
               tone: "slate",
             },
           ],
-          formulaTex: "S_n = \\sum_{i=1}^{n} f(\\xi_i)\\,\\Delta x",
+          formulaTex: `\\Delta x = \\frac{${formatNumber(b, 3)}-${formatNumber(a, 3)}}{${tool.n}}`,
           formulaSteps: [
-            "S_n = \\sum_{i=1}^{n} f(\\xi_i)\\,\\Delta x",
+            `\\Delta x = \\frac{${formatNumber(b, 3)}-${formatNumber(a, 3)}}{${tool.n}}`,
             `\\int_{${formatNumber(a, 3)}}^{${formatNumber(b, 3)}} ${texA}\\,dx = ${formatNumber(integral.value)}`,
-            "S_n = \\text{недоступно для выбранного разбиения}",
+            "\\text{Аппроксимация недоступна для выбранного разбиения}",
           ],
           explanation: [
             "\u0418\u043d\u0442\u0435\u0433\u0440\u0430\u043b \u043d\u0430 \u043e\u0442\u0440\u0435\u0437\u043a\u0435 \u0441\u0443\u0449\u0435\u0441\u0442\u0432\u0443\u0435\u0442, \u043d\u043e \u0432\u044b\u0431\u0440\u0430\u043d\u043d\u043e\u0435 \u0440\u0430\u0437\u0431\u0438\u0435\u043d\u0438\u0435 \u0438\u043b\u0438 \u0442\u043e\u0447\u043a\u0438 \u0432\u044b\u0431\u043e\u0440\u043a\u0438 \u043f\u043e\u043f\u0430\u0434\u0430\u044e\u0442 \u0432 \u043e\u0441\u043e\u0431\u0435\u043d\u043d\u043e\u0441\u0442\u044c.",
@@ -1212,11 +1458,11 @@ export function buildOverlay(
           "\u041d\u0430 \u0432\u044b\u0431\u0440\u0430\u043d\u043d\u043e\u043c \u0440\u0430\u0437\u0431\u0438\u0435\u043d\u0438\u0438 \u043d\u0435\u0442 \u043a\u043e\u043d\u0435\u0447\u043d\u044b\u0445 \u0437\u043d\u0430\u0447\u0435\u043d\u0438\u0439.",
           used === 0,
         ),
-        formulaTex: "S_n = \\sum_{i=1}^{n} f(\\xi_i)\\,\\Delta x",
+        formulaTex: `\\Delta x = \\frac{${formatNumber(b, 3)}-${formatNumber(a, 3)}}{${tool.n}}`,
         formulaSteps: [
-          "S_n = \\sum_{i=1}^{n} f(\\xi_i)\\,\\Delta x",
+          `\\Delta x = \\frac{${formatNumber(b, 3)}-${formatNumber(a, 3)}}{${tool.n}}`,
           `S_n \\approx ${formatNumber(approx)}`,
-          `\\left|S_n - I\\right| = ${formatNumber(Math.abs(approx - integral.value))}`,
+          `\\text{Абсолютная ошибка} = ${formatNumber(Math.abs(approx - integral.value))}`,
         ],
         explanation: [
           "\u0421\u0443\u043c\u043c\u0430 \u0420\u0438\u043c\u0430\u043d\u0430 \u0434\u0430\u0451\u0442 \u043f\u0440\u0438\u0431\u043b\u0438\u0436\u0435\u043d\u0438\u0435 \u0438\u043d\u0442\u0435\u0433\u0440\u0430\u043b\u0430 \u0447\u0435\u0440\u0435\u0437 \u043f\u0440\u044f\u043c\u043e\u0443\u0433\u043e\u043b\u044c\u043d\u0438\u043a\u0438.",
@@ -1242,10 +1488,8 @@ export function buildOverlay(
             { label: "\u0418\u043d\u0442\u0435\u0440\u0432\u0430\u043b", value: formatIntervalText(a, b, 3), tone: "slate" },
             statusMetric("\u0411\u0435\u0441\u043a\u043e\u043d\u0435\u0447\u043d\u044b\u0435 \u0433\u0440\u0430\u043d\u0438\u0446\u044b \u0432 \u0442\u0435\u043a\u0443\u0449\u0435\u043c \u043c\u0435\u0442\u043e\u0434\u0435 \u0442\u0440\u0430\u043f\u0435\u0446\u0438\u0439 \u043d\u0435 \u043f\u043e\u0434\u0434\u0435\u0440\u0436\u0438\u0432\u0430\u044e\u0442\u0441\u044f."),
           ],
-          formulaTex:
-            "\\int_a^b f(x)\\,dx \\approx \\frac{h}{2}\\bigl(f(x_0)+2\\sum_{i=1}^{n-1}f(x_i)+f(x_n)\\bigr)",
+          formulaTex: "\\text{Бесконечные границы в текущем режиме не поддерживаются}",
           formulaSteps: [
-            "\\int_a^b f(x)\\,dx \\approx \\frac{h}{2}\\bigl(f(x_0)+2\\sum_{i=1}^{n-1}f(x_i)+f(x_n)\\bigr)",
             "\\text{Бесконечные границы в текущем режиме не поддерживаются}",
           ],
           explanation: [
@@ -1312,12 +1556,10 @@ export function buildOverlay(
             { label: "\u0428\u0430\u0433 h", value: formatNumber(width), tone: "amber" },
             { label: "\u0421\u0442\u0430\u0442\u0443\u0441", value: "\u041d\u0430 \u0438\u043d\u0442\u0435\u0440\u0432\u0430\u043b\u0435 \u043d\u0435\u0442 \u043a\u043e\u0440\u0440\u0435\u043a\u0442\u043d\u043e\u0433\u043e \u043a\u043e\u043d\u0435\u0447\u043d\u043e\u0433\u043e \u0438\u043d\u0442\u0435\u0433\u0440\u0430\u043b\u0430.", tone: "slate" },
           ],
-          formulaTex:
-            "\\int_a^b f(x)\\,dx \\approx \\frac{h}{2}\\bigl(f(x_0)+2\\sum_{i=1}^{n-1}f(x_i)+f(x_n)\\bigr)",
+          formulaTex: `\\int_{${formatNumber(a, 3)}}^{${formatNumber(b, 3)}} ${texA}\\,dx = \\text{расходится}`,
           formulaSteps: [
-            "\\int_a^b f(x)\\,dx \\approx \\frac{h}{2}\\bigl(f(x_0)+2\\sum_{i=1}^{n-1}f(x_i)+f(x_n)\\bigr)",
             `\\int_{${formatNumber(a, 3)}}^{${formatNumber(b, 3)}} ${texA}\\,dx = \\text{расходится}`,
-            "T_n \\text{ не даёт корректного конечного результата на этом интервале}",
+            "\\text{Метод трапеций не даёт корректного конечного результата на этом интервале}",
           ],
           explanation: [
             "\u041c\u0435\u0442\u043e\u0434 \u0442\u0440\u0430\u043f\u0435\u0446\u0438\u0439 \u0438\u043c\u0435\u0435\u0442 \u0441\u043c\u044b\u0441\u043b \u043a\u0430\u043a \u043f\u0440\u0438\u0431\u043b\u0438\u0436\u0435\u043d\u0438\u0435 \u0441\u0443\u0449\u0435\u0441\u0442\u0432\u0443\u044e\u0449\u0435\u0433\u043e \u043a\u043e\u043d\u0435\u0447\u043d\u043e\u0433\u043e \u0438\u043d\u0442\u0435\u0433\u0440\u0430\u043b\u0430.",
@@ -1346,12 +1588,11 @@ export function buildOverlay(
               tone: "slate",
             },
           ],
-          formulaTex:
-            "\\int_a^b f(x)\\,dx \\approx \\frac{h}{2}\\bigl(f(x_0)+2\\sum_{i=1}^{n-1}f(x_i)+f(x_n)\\bigr)",
+          formulaTex: `\\Delta x = \\frac{${formatNumber(b, 3)}-${formatNumber(a, 3)}}{${tool.n}}`,
           formulaSteps: [
-            "\\int_a^b f(x)\\,dx \\approx \\frac{h}{2}\\bigl(f(x_0)+2\\sum_{i=1}^{n-1}f(x_i)+f(x_n)\\bigr)",
+            `\\Delta x = \\frac{${formatNumber(b, 3)}-${formatNumber(a, 3)}}{${tool.n}}`,
             `\\int_{${formatNumber(a, 3)}}^{${formatNumber(b, 3)}} ${texA}\\,dx = ${formatNumber(integral.value)}`,
-            "T_n = \\text{недоступно для выбранного разбиения}",
+            "\\text{Аппроксимация недоступна для выбранного разбиения}",
           ],
           explanation: [
             "\u0418\u043d\u0442\u0435\u0433\u0440\u0430\u043b \u043d\u0430 \u043e\u0442\u0440\u0435\u0437\u043a\u0435 \u0441\u0443\u0449\u0435\u0441\u0442\u0432\u0443\u0435\u0442, \u043d\u043e \u0442\u0435\u043a\u0443\u0449\u0430\u044f \u0441\u0435\u0442\u043a\u0430 \u0442\u0440\u0430\u043f\u0435\u0446\u0438\u0439 \u043f\u043e\u043f\u0430\u0434\u0430\u0435\u0442 \u0432 \u043e\u0441\u043e\u0431\u0435\u043d\u043d\u043e\u0441\u0442\u044c.",
@@ -1379,12 +1620,11 @@ export function buildOverlay(
           "\u041d\u0430 \u0432\u044b\u0431\u0440\u0430\u043d\u043d\u043e\u043c \u0438\u043d\u0442\u0435\u0440\u0432\u0430\u043b\u0435 \u043d\u0435\u0442 \u043a\u043e\u043d\u0435\u0447\u043d\u044b\u0445 \u0442\u0440\u0430\u043f\u0435\u0446\u0438\u0439.",
           used === 0,
         ),
-        formulaTex:
-          "\\int_a^b f(x)\\,dx \\approx \\frac{h}{2}\\bigl(f(x_0)+2\\sum_{i=1}^{n-1}f(x_i)+f(x_n)\\bigr)",
+        formulaTex: `\\Delta x = \\frac{${formatNumber(b, 3)}-${formatNumber(a, 3)}}{${tool.n}}`,
         formulaSteps: [
-          "\\int_a^b f(x)\\,dx \\approx \\frac{h}{2}\\bigl(f(x_0)+2\\sum_{i=1}^{n-1}f(x_i)+f(x_n)\\bigr)",
+          `\\Delta x = \\frac{${formatNumber(b, 3)}-${formatNumber(a, 3)}}{${tool.n}}`,
           `T_n \\approx ${formatNumber(approx)}`,
-          `\\left|T_n - I\\right| = ${formatNumber(Math.abs(approx - integral.value))}`,
+          `\\text{Абсолютная ошибка} = ${formatNumber(Math.abs(approx - integral.value))}`,
         ],
         explanation: [
           "\u041c\u0435\u0442\u043e\u0434 \u0442\u0440\u0430\u043f\u0435\u0446\u0438\u0439 \u0437\u0430\u043c\u0435\u043d\u044f\u0435\u0442 \u0434\u0443\u0433\u0443 \u0433\u0440\u0430\u0444\u0438\u043a\u0430 \u043d\u0430 \u043a\u0430\u0436\u0434\u043e\u043c \u0448\u0430\u0433\u0435 \u043e\u0442\u0440\u0435\u0437\u043a\u043e\u043c.",
@@ -1401,8 +1641,19 @@ export function buildOverlay(
 
       const snapshot = buildUnderSnapshot(fnA, a, b);
       const texA = expressionA ? expressionToTex(expressionA.normalized) : "f(x)";
+      const primitiveTex = expressionA ? elementaryAntiderivativeTex(expressionA.normalized) : null;
 
       const integralFinite = estimateIsFinite(snapshot.signedIntegral);
+      const formulaSteps = primitiveTex
+        ? [
+            `F(x) = ${primitiveTex}`,
+            `\\int_{${formatBoundTex(a, 3)}}^{${formatBoundTex(b, 3)}} ${texA}\\,dx = \\left[${primitiveTex}\\right]_{${formatBoundTex(a, 3)}}^{${formatBoundTex(b, 3)}}`,
+            `\\int_{${formatBoundTex(a, 3)}}^{${formatBoundTex(b, 3)}} ${texA}\\,dx = ${integralFinite ? integralEstimateTex(snapshot.signedIntegral) : "\\text{расходится}"}`,
+          ]
+        : [
+            `\\int_{${formatBoundTex(a, 3)}}^{${formatBoundTex(b, 3)}} ${texA}\\,dx = F(${formatBoundTex(b, 3)}) - F(${formatBoundTex(a, 3)})`,
+            `\\int_{${formatBoundTex(a, 3)}}^{${formatBoundTex(b, 3)}} ${texA}\\,dx = ${integralFinite ? integralEstimateTex(snapshot.signedIntegral) : "\\text{расходится}"}`,
+          ];
       return {
         regions: Number.isFinite(a) && Number.isFinite(b) && integralFinite ? snapshot.regions : [],
         polygons: [],
@@ -1418,14 +1669,13 @@ export function buildOverlay(
           "\u041d\u0430 \u0432\u044b\u0431\u0440\u0430\u043d\u043d\u043e\u043c \u0438\u043d\u0442\u0435\u0440\u0432\u0430\u043b\u0435 \u043d\u0435\u0442 \u043a\u043e\u043d\u0435\u0447\u043d\u044b\u0445 \u0437\u043d\u0430\u0447\u0435\u043d\u0438\u0439.",
           !integralFinite,
         ),
-        formulaTex: `\\int_{${formatBoundTex(a, 3)}}^{${formatBoundTex(b, 3)}} ${texA}\\,dx = F(${formatBoundTex(b, 3)}) - F(${formatBoundTex(a, 3)})`,
-        formulaSteps: [
-          `\\int_{${formatBoundTex(a, 3)}}^{${formatBoundTex(b, 3)}} ${texA}\\,dx = F(${formatBoundTex(b, 3)}) - F(${formatBoundTex(a, 3)})`,
-          `\\int_{${formatBoundTex(a, 3)}}^{${formatBoundTex(b, 3)}} ${texA}\\,dx = ${integralFinite ? integralEstimateTex(snapshot.signedIntegral) : "\\text{расходится}"}`,
-        ],
+        formulaTex: formulaSteps[0] ?? `\\int_{${formatBoundTex(a, 3)}}^{${formatBoundTex(b, 3)}} ${texA}\\,dx`,
+        formulaSteps,
         explanation: [
           "\u0420\u0435\u0436\u0438\u043c \u043f\u043e\u043a\u0430\u0437\u044b\u0432\u0430\u0435\u0442 \u0438\u0434\u0435\u044e \u0444\u043e\u0440\u043c\u0443\u043b\u044b \u041d\u044c\u044e\u0442\u043e\u043d\u0430-\u041b\u0435\u0439\u0431\u043d\u0438\u0446\u0430: \u0438\u043d\u0442\u0435\u0433\u0440\u0430\u043b \u0440\u0430\u0432\u0435\u043d \u0438\u0437\u043c\u0435\u043d\u0435\u043d\u0438\u044e \u043f\u0435\u0440\u0432\u043e\u043e\u0431\u0440\u0430\u0437\u043d\u043e\u0439 \u043d\u0430 \u043a\u043e\u043d\u0446\u0430\u0445 \u043e\u0442\u0440\u0435\u0437\u043a\u0430.",
-          "\u0421\u0438\u043c\u0432\u043e\u043b\u0438\u0447\u0435\u0441\u043a\u0430\u044f \u043f\u0435\u0440\u0432\u043e\u043e\u0431\u0440\u0430\u0437\u043d\u0430\u044f \u0430\u0432\u0442\u043e\u043c\u0430\u0442\u0438\u0447\u0435\u0441\u043a\u0438 \u043d\u0435 \u0441\u0442\u0440\u043e\u0438\u0442\u0441\u044f: \u0441\u0435\u0439\u0447\u0430\u0441 \u0440\u0435\u0436\u0438\u043c \u0434\u0430\u0451\u0442 \u0432\u0438\u0437\u0443\u0430\u043b\u0438\u0437\u0430\u0446\u0438\u044e \u0438 \u0447\u0438\u0441\u043b\u0435\u043d\u043d\u044b\u0439 \u0438\u0442\u043e\u0433.",
+          primitiveTex
+            ? "\u0414\u043b\u044f \u043f\u0440\u043e\u0441\u0442\u043e\u0439 \u0444\u0443\u043d\u043a\u0446\u0438\u0438 \u043f\u0435\u0440\u0432\u043e\u043e\u0431\u0440\u0430\u0437\u043d\u0430\u044f \u0440\u0430\u0441\u043f\u043e\u0437\u043d\u0430\u043d\u0430 \u0438 \u043f\u043e\u043a\u0430\u0437\u0430\u043d\u0430 \u044f\u0432\u043d\u043e."
+            : "\u0421\u0438\u043c\u0432\u043e\u043b\u0438\u0447\u0435\u0441\u043a\u0430\u044f \u043f\u0435\u0440\u0432\u043e\u043e\u0431\u0440\u0430\u0437\u043d\u0430\u044f \u0430\u0432\u0442\u043e\u043c\u0430\u0442\u0438\u0447\u0435\u0441\u043a\u0438 \u043d\u0435 \u0440\u0430\u0441\u043f\u043e\u0437\u043d\u0430\u043d\u0430, \u043f\u043e\u044d\u0442\u043e\u043c\u0443 \u043e\u0441\u0442\u0430\u0451\u0442\u0441\u044f \u0443\u0447\u0435\u0431\u043d\u0430\u044f \u0444\u043e\u0440\u043c\u0430 F(b)-F(a).",
         ],
         volumePreview: null,
       };
@@ -1447,9 +1697,9 @@ export function buildOverlay(
             { label: "\u0418\u043d\u0442\u0435\u0440\u0432\u0430\u043b", value: formatIntervalText(a, b, 3), tone: "slate" },
             statusMetric("\u0421\u0440\u0435\u0434\u043d\u0435\u0435 \u0437\u043d\u0430\u0447\u0435\u043d\u0438\u0435 \u0432 \u0442\u0435\u043a\u0443\u0449\u0435\u043c \u0440\u0435\u0436\u0438\u043c\u0435 \u043e\u043f\u0440\u0435\u0434\u0435\u043b\u044f\u0435\u0442\u0441\u044f \u0442\u043e\u043b\u044c\u043a\u043e \u043d\u0430 \u043a\u043e\u043d\u0435\u0447\u043d\u043e\u043c \u043e\u0442\u0440\u0435\u0437\u043a\u0435."),
           ],
-          formulaTex: `f_{\\text{avg}} = \\frac{1}{b-a}\\int_a^b ${expressionA ? expressionToTex(expressionA.normalized) : "f(x)"}\\,dx`,
+          formulaTex: `f_{\\text{avg}}(b-a) = \\int_a^b ${expressionA ? expressionToTex(expressionA.normalized) : "f(x)"}\\,dx`,
           formulaSteps: [
-            `f_{\\text{avg}} = \\frac{1}{b-a}\\int_a^b ${expressionA ? expressionToTex(expressionA.normalized) : "f(x)"}\\,dx`,
+            `f_{\\text{avg}}(b-a) = \\int_a^b ${expressionA ? expressionToTex(expressionA.normalized) : "f(x)"}\\,dx`,
             "\\text{Среднее значение в этой модели поддерживается только на конечном отрезке}",
           ],
           explanation: [
@@ -1502,12 +1752,12 @@ export function buildOverlay(
         : snapshot.points;
       const formulaSteps = averageFinite
         ? [
-            `f_{\\text{avg}} = \\frac{1}{${formatNumber(b - a, 3)}}\\int_{${formatBoundTex(a, 3)}}^{${formatBoundTex(b, 3)}} ${texA}\\,dx`,
-            `f_{\\text{avg}} = \\frac{${integralEstimateTex(integral)}}{${formatNumber(b - a, 3)}}`,
+            `f_{\\text{avg}}\\,${formatNumber(b - a, 3)} = \\int_{${formatBoundTex(a, 3)}}^{${formatBoundTex(b, 3)}} ${texA}\\,dx`,
+            `f_{\\text{avg}}\\,${formatNumber(b - a, 3)} = ${integralEstimateTex(integral)}`,
             `f_{\\text{avg}} = ${formatNumber(averageValue)}`,
           ]
         : [
-            `f_{\\text{avg}} = \\frac{1}{${formatNumber(b - a, 3)}}\\int_{${formatBoundTex(a, 3)}}^{${formatBoundTex(b, 3)}} ${texA}\\,dx`,
+            `f_{\\text{avg}}\\,${formatNumber(b - a, 3)} = \\int_{${formatBoundTex(a, 3)}}^{${formatBoundTex(b, 3)}} ${texA}\\,dx`,
             `\\int_{${formatBoundTex(a, 3)}}^{${formatBoundTex(b, 3)}} ${texA}\\,dx = \\text{расходится}`,
             "f_{\\text{avg}} \\text{ не существует}",
           ];
@@ -1527,7 +1777,7 @@ export function buildOverlay(
           "\u041d\u0435 \u0443\u0434\u0430\u043b\u043e\u0441\u044c \u043a\u043e\u0440\u0440\u0435\u043a\u0442\u043d\u043e \u043e\u0446\u0435\u043d\u0438\u0442\u044c \u0441\u0440\u0435\u0434\u043d\u0435\u0435 \u0437\u043d\u0430\u0447\u0435\u043d\u0438\u0435.",
           !averageFinite,
         ),
-        formulaTex: `f_{\\text{avg}} = \\frac{1}{${formatNumber(b - a, 3)}}\\int_{${formatBoundTex(a, 3)}}^{${formatBoundTex(b, 3)}} ${texA}\\,dx`,
+        formulaTex: `f_{\\text{avg}}\\,${formatNumber(b - a, 3)} = \\int_{${formatBoundTex(a, 3)}}^{${formatBoundTex(b, 3)}} ${texA}\\,dx`,
         formulaSteps,
         explanation: averageFinite
           ? [
@@ -1616,9 +1866,10 @@ export function buildOverlay(
         }
 
         const [previewLeft, previewRight] = previewBounds;
+        const previewSliceCount = volumeSliceCount(previewLeft, previewRight);
         const slices = volumeFinite
-          ? Array.from({ length: 36 }, (_, index) => {
-              const x = previewLeft + ((previewRight - previewLeft) * index) / 35;
+          ? Array.from({ length: previewSliceCount }, (_, index) => {
+              const x = previewLeft + ((previewRight - previewLeft) * index) / Math.max(1, previewSliceCount - 1);
               const y = fnA(x);
               const outerR = Number.isFinite(y) ? Math.abs(y) : 0;
               return { x, outerR, innerR: 0, section: "disk" as const };
@@ -1640,10 +1891,10 @@ export function buildOverlay(
             { label: "\u0418\u043d\u0442\u0435\u0440\u0432\u0430\u043b", value: intervalLabel, tone: "slate" },
             ...(volumeFinite ? [] : [statusMetric("\u041d\u0435\u0441\u043e\u0431\u0441\u0442\u0432\u0435\u043d\u043d\u044b\u0439 \u0438\u043d\u0442\u0435\u0433\u0440\u0430\u043b \u043e\u0431\u044a\u0451\u043c\u0430 \u043d\u0435 \u043f\u043e\u0434\u0442\u0432\u0435\u0440\u0436\u0434\u0430\u0435\u0442 \u043a\u043e\u043d\u0435\u0447\u043d\u043e\u0435 \u0437\u043d\u0430\u0447\u0435\u043d\u0438\u0435.")]),
           ],
-          formulaTex: "V = \\pi \\int_a^b (f(x))^2\\,dx",
+          formulaTex: "V = \\pi \\int_a^b f(x)^2\\,dx",
           formulaSteps: [
-            "V = \\pi \\int_a^b (f(x))^2\\,dx",
-            `V = \\pi \\int_{${formatBoundTex(a, 3)}}^{${formatBoundTex(b, 3)}} \\left(${texA}\\right)^2\\,dx`,
+            "V = \\pi \\int_a^b f(x)^2\\,dx",
+            `V = \\pi \\int_{${formatBoundTex(a, 3)}}^{${formatBoundTex(b, 3)}} ${squareTex(texA)}\\,dx`,
             volumeFinite ? `V = ${integralEstimateTex(volumeEstimate)}` : "V = \\text{расходится}",
           ],
           explanation: volumeFinite
@@ -1732,7 +1983,7 @@ export function buildOverlay(
 
         if (estimateIsFinite(estimate)) {
           segmentSteps.push(
-            `V_${segmentSteps.length + 1} = \\pi \\int_{${formatBoundTex(left, 3)}}^{${formatBoundTex(right, 3)}} \\left((${outerTex})^2 - (${innerTex})^2\\right)\\,dx`,
+            `V_${segmentSteps.length + 1} = \\pi \\int_{${formatBoundTex(left, 3)}}^{${formatBoundTex(right, 3)}} \\left(${differenceOfSquaresTex(outerTex, innerTex)}\\right)\\,dx`,
           );
         }
 
@@ -1759,9 +2010,10 @@ export function buildOverlay(
       const [previewLeft, previewRight] = previewBounds;
       const pickSegment = (x: number) =>
         segments.find((segment, index) => x >= segment.left && (x <= segment.right || index === segments.length - 1)) ?? null;
+      const previewSliceCount = volumeSliceCount(previewLeft, previewRight);
       const slices = volumeFinite
-        ? Array.from({ length: 36 }, (_, index) => {
-            const x = previewLeft + ((previewRight - previewLeft) * index) / 35;
+        ? Array.from({ length: previewSliceCount }, (_, index) => {
+            const x = previewLeft + ((previewRight - previewLeft) * index) / Math.max(1, previewSliceCount - 1);
             const segment = pickSegment(x);
             if (!segment) {
               return { x, outerR: 0, innerR: 0, section: "disk" as const };
@@ -1810,7 +2062,7 @@ export function buildOverlay(
         formulaSteps: volumeFinite
           ? [
               "V = \\pi \\int_a^b \\left(R(x)^2-r(x)^2\\right)\\,dx",
-              ...segmentSteps,
+              ...compactVolumeSegmentSteps(segmentSteps),
               `V = ${integralEstimateTex(volumeEstimate)}`,
             ]
           : [

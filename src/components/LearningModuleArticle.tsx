@@ -29,7 +29,7 @@ export function LearningModuleArticle({ module, onOpenPreset }: LearningModuleAr
     <Card title={module.title} subtitle={module.summary}>
       <div className="learning-article" ref={articleRef}>
         <div className="learning-summary">
-          <strong>{decodeEscapedUnicode("Кратко")}</strong>
+          <strong>Кратко</strong>
           <p>{decodeEscapedUnicode(module.summary)}</p>
         </div>
 

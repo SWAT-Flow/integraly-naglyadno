@@ -85,11 +85,11 @@ export function VolumePreview({ data }: VolumePreviewProps) {
       const plotHeight = size.height - padding.top - padding.bottom;
       const baseY = padding.top + plotHeight * 0.52;
       const maxRadius = Math.max(1e-6, ...data.slices.map((slice) => slice.outerR));
-      const yScale = (plotHeight * 0.38) / maxRadius;
+      const yScale = (plotHeight * 0.4) / maxRadius;
       const xTo = (x: number) =>
         padding.left + ((x - data.a) / Math.max(1e-9, data.b - data.a)) * plotWidth;
       const rTo = (value: number) => value * yScale;
-      const squash = 0.34;
+      const squash = 0.48;
 
       context.strokeStyle = COLORS.ink;
       context.lineWidth = 1.5;
@@ -103,7 +103,7 @@ export function VolumePreview({ data }: VolumePreviewProps) {
       for (const slice of data.slices) {
         const outerRadius = rTo(slice.outerR);
         const innerRadius = rTo(slice.innerR);
-        const ellipseRadiusX = Math.max(1.5, outerRadius * squash);
+        const ellipseRadiusX = Math.max(2, outerRadius * squash);
         context.beginPath();
         context.ellipse(xTo(slice.x), baseY, ellipseRadiusX, outerRadius, 0, 0, Math.PI * 2);
         context.fill();
@@ -114,7 +114,7 @@ export function VolumePreview({ data }: VolumePreviewProps) {
           context.fillStyle = "#ffffff";
           context.strokeStyle = "rgba(217, 119, 6, 0.7)";
           context.beginPath();
-          context.ellipse(xTo(slice.x), baseY, Math.max(1, innerRadius * squash), innerRadius, 0, 0, Math.PI * 2);
+          context.ellipse(xTo(slice.x), baseY, Math.max(1.2, innerRadius * squash), innerRadius, 0, 0, Math.PI * 2);
           context.fill();
           context.stroke();
           context.restore();
@@ -122,19 +122,36 @@ export function VolumePreview({ data }: VolumePreviewProps) {
       }
 
       const frontFactor = Math.cos(phase);
+      const drawSmoothCurve = (points: Array<{ x: number; y: number }>) => {
+        if (!points.length) {
+          return;
+        }
+
+        context.moveTo(points[0].x, points[0].y);
+        if (points.length === 1) {
+          return;
+        }
+
+        for (let index = 0; index < points.length - 1; index += 1) {
+          const current = points[index];
+          const next = points[index + 1];
+          const controlX = (current.x + next.x) / 2;
+          const controlY = (current.y + next.y) / 2;
+          context.quadraticCurveTo(current.x, current.y, controlX, controlY);
+        }
+
+        const last = points[points.length - 1];
+        context.lineTo(last.x, last.y);
+      };
+
       const drawBody = (sign: 1 | -1, dashed: boolean, radiusKey: "outerR" | "innerR", strokeStyle: string) => {
+        const points = data.slices.map((slice) => ({
+          x: xTo(slice.x),
+          y: baseY - rTo(slice[radiusKey]) * frontFactor * sign,
+        }));
         context.beginPath();
-        data.slices.forEach((slice, index) => {
-          const radius = rTo(slice[radiusKey]) * frontFactor * sign;
-          const x = xTo(slice.x);
-          const y = baseY - radius;
-          if (index === 0) {
-            context.moveTo(x, y);
-          } else {
-            context.lineTo(x, y);
-          }
-        });
-        context.lineWidth = dashed ? 1.2 : 2;
+        drawSmoothCurve(points);
+        context.lineWidth = dashed ? 1.2 : 2.2;
         context.strokeStyle = dashed ? "rgba(124, 58, 237, 0.4)" : strokeStyle;
         context.setLineDash(dashed ? [7, 5] : []);
         context.stroke();

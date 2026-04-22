@@ -26,6 +26,7 @@ const CUSTOM_SCOPE = {
   atanh: Math.atanh,
   exp: Math.exp,
   ln: Math.log,
+  lg: Math.log10,
   log: (...args: number[]) => {
     if (args.length === 1) {
       return Math.log10(args[0]);
@@ -122,6 +123,7 @@ const FUNCTION_TEXT_LABELS: Record<string, string> = {
   atanh: INVERSE_FUNCTION_TEXT_LABELS.atanh,
   exp: "exp",
   ln: "ln",
+  lg: "lg",
   log: "log",
   sqrt: "\u221a",
   abs: "||",
@@ -148,6 +150,7 @@ const FUNCTION_TEX_LABELS: Record<string, string> = {
   atanh: "\\tanh^{-1}",
   exp: "\\exp",
   ln: "\\ln",
+  lg: "\\lg",
   log: "\\log",
 };
 

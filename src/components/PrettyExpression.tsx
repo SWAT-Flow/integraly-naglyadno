@@ -1,5 +1,6 @@
 import { Fragment, memo, useMemo, type ReactNode } from "react";
 import { buildPrettyExpression, type PrettyFunctionNode, type PrettyLeafNode, type PrettyNode } from "../math/prettyExpression";
+import type { MathFieldPointerTarget } from "../math/mathFieldEditing";
 
 interface PrettyExpressionProps {
   expression: string;
@@ -7,7 +8,7 @@ interface PrettyExpressionProps {
   selectionEnd?: number;
   className?: string;
   compact?: boolean;
-  onPointerDown?: (rawIndex: number, event: React.PointerEvent<HTMLSpanElement>) => void;
+  onPointerDown?: (target: MathFieldPointerTarget, event: React.PointerEvent<HTMLSpanElement>) => void;
 }
 
 interface SelectionRange {
@@ -204,7 +205,7 @@ function renderFunctionLabel(node: PrettyFunctionNode, selection: SelectionRange
   );
 }
 
-function renderNode(node: PrettyNode, selection: SelectionRange | null, key: string): ReactNode {
+function renderNode(node: PrettyNode, selection: SelectionRange | null, key: string, path: string): ReactNode {
   switch (node.kind) {
     case "leaf":
       return renderLeaf(node, selection, key);
@@ -215,15 +216,15 @@ function renderNode(node: PrettyNode, selection: SelectionRange | null, key: str
     case "sequence":
       return (
         <span key={key} className="pretty-expression-sequence">
-          {node.children.map((child, index) => renderNode(child, selection, `${key}-${index}`))}
+          {node.children.map((child, index) => renderNode(child, selection, `${key}-${index}`, `${path}/${index}`))}
         </span>
       );
 
     case "group":
       return (
-        <span key={key} className="pretty-expression-group">
+        <span key={key} className="pretty-expression-group" data-slot-path={`${path}/group`}>
           {renderInteractiveLeaf("(", node.openStart, node.openEnd, selection, "pretty-expression-token-paren", `${key}-open`)}
-          {renderNode(node.content, selection, `${key}-content`)}
+          {renderNode(node.content, selection, `${key}-content`, `${path}/group/content`)}
           {node.closeStart !== null && node.closeEnd !== null
             ? renderInteractiveLeaf(")", node.closeStart, node.closeEnd, selection, "pretty-expression-token-paren", `${key}-close`)
             : null}
@@ -233,22 +234,28 @@ function renderNode(node: PrettyNode, selection: SelectionRange | null, key: str
     case "power":
       return (
         <span key={key} className="pretty-expression-power">
-          <span className="pretty-expression-power-base">{renderNode(node.base, selection, `${key}-base`)}</span>
-          <span className="pretty-expression-power-exponent">{renderNode(node.exponent, selection, `${key}-exp`)}</span>
+          <span className="pretty-expression-power-base">{renderNode(node.base, selection, `${key}-base`, `${path}/base`)}</span>
+          <span className="pretty-expression-power-exponent" data-slot-path={`${path}/exp`}>
+            {renderNode(node.exponent, selection, `${key}-exp`, `${path}/exp/content`)}
+          </span>
         </span>
       );
 
     case "fraction":
       return (
         <span key={key} className="pretty-expression-fraction">
-          <span className="pretty-expression-fraction-numerator">{renderNode(node.numerator, selection, `${key}-num`)}</span>
+          <span className="pretty-expression-fraction-numerator" data-slot-path={`${path}/num`}>
+            {renderNode(node.numerator, selection, `${key}-num`, `${path}/num/content`)}
+          </span>
           <span
             className="pretty-expression-fraction-line"
             data-display-length={1}
             data-raw-end={node.slashEnd}
             data-raw-start={node.slashStart}
           />
-          <span className="pretty-expression-fraction-denominator">{renderNode(node.denominator, selection, `${key}-den`)}</span>
+          <span className="pretty-expression-fraction-denominator" data-slot-path={`${path}/den`}>
+            {renderNode(node.denominator, selection, `${key}-den`, `${path}/den/content`)}
+          </span>
         </span>
       );
 
@@ -264,6 +271,7 @@ function renderNode(node: PrettyNode, selection: SelectionRange | null, key: str
               node.args[0] ?? { kind: "placeholder", placeholderType: "argument", rawStart: node.rawEnd, rawEnd: node.rawEnd },
               selection,
               `${key}-arg`,
+              `${path}/arg0/content`,
             )}
             {node.closeStart !== null && node.closeEnd !== null
               ? renderInteractiveLeaf(")", node.closeStart, node.closeEnd, selection, "pretty-expression-token-paren", `${key}-close`)
@@ -279,12 +287,13 @@ function renderNode(node: PrettyNode, selection: SelectionRange | null, key: str
         const rightEnd = node.closeEnd ?? node.rawEnd;
 
         return (
-          <span key={key} className="pretty-expression-abs">
+          <span key={key} className="pretty-expression-abs" data-slot-path={`${path}/arg0`}>
             {renderInteractiveLeaf("|", leftStart, leftEnd, selection, "pretty-expression-token-abs", `${key}-left`)}
             {renderNode(
               node.args[0] ?? { kind: "placeholder", placeholderType: "argument", rawStart: leftEnd, rawEnd: leftEnd },
               selection,
               `${key}-arg`,
+              `${path}/arg0/content`,
             )}
             {renderInteractiveLeaf("|", rightStart, rightEnd, selection, "pretty-expression-token-abs", `${key}-right`)}
           </span>
@@ -295,22 +304,22 @@ function renderNode(node: PrettyNode, selection: SelectionRange | null, key: str
         return (
           <span key={key} className="pretty-expression-log-base">
             <span className="pretty-expression-log-base-label">{renderFunctionLabel(node, selection, `${key}-label`)}</span>
-            <span className="pretty-expression-log-base-subscript">
+            <span className="pretty-expression-log-base-subscript" data-slot-path={`${path}/arg0`}>
               {renderNode(
                 node.args[0] ?? { kind: "placeholder", placeholderType: "argument", rawStart: node.rawEnd, rawEnd: node.rawEnd },
                 selection,
                 `${key}-base`,
+                `${path}/arg0/content`,
               )}
             </span>
-            {renderInteractiveLeaf("(", node.openStart ?? node.nameEnd, node.openEnd ?? node.nameEnd, selection, "pretty-expression-token-paren", `${key}-open`)}
-            {renderNode(
-              node.args[1] ?? { kind: "placeholder", placeholderType: "argument", rawStart: node.rawEnd, rawEnd: node.rawEnd },
-              selection,
-              `${key}-value`,
-            )}
-            {node.closeStart !== null && node.closeEnd !== null
-              ? renderInteractiveLeaf(")", node.closeStart, node.closeEnd, selection, "pretty-expression-token-paren", `${key}-close`)
-              : null}
+            <span className="pretty-expression-log-base-value" data-slot-path={`${path}/arg1`}>
+              {renderNode(
+                node.args[1] ?? { kind: "placeholder", placeholderType: "argument", rawStart: node.rawEnd, rawEnd: node.rawEnd },
+                selection,
+                `${key}-value`,
+                `${path}/arg1/content`,
+              )}
+            </span>
           </span>
         );
       }
@@ -322,12 +331,14 @@ function renderNode(node: PrettyNode, selection: SelectionRange | null, key: str
             ? renderInteractiveLeaf("(", node.openStart, node.openEnd, selection, "pretty-expression-token-paren", `${key}-open`)
             : null}
           {node.args.length
-            ? node.args.map((argument, index) => (
+              ? node.args.map((argument, index) => (
                 <Fragment key={`${key}-arg-${index}`}>
                   {index > 0
                     ? renderInteractiveLeaf(",", node.openEnd ?? node.rawStart, node.openEnd ?? node.rawStart, selection, "pretty-expression-token-comma", `${key}-comma-${index}`)
                     : null}
-                  {renderNode(argument, selection, `${key}-arg-${index}`)}
+                  <span className="pretty-expression-function-argument" data-slot-path={`${path}/arg${index}`}>
+                    {renderNode(argument, selection, `${key}-arg-${index}`, `${path}/arg${index}/content`)}
+                  </span>
                 </Fragment>
               ))
             : null}
@@ -339,14 +350,14 @@ function renderNode(node: PrettyNode, selection: SelectionRange | null, key: str
   }
 }
 
-function resolveRawIndexFromPoint(root: HTMLElement, clientX: number, clientY: number, fallback: number) {
+function resolvePointerTargetFromPoint(root: HTMLElement, clientX: number, clientY: number, fallback: number): MathFieldPointerTarget {
   const documentRef = globalThis.document as (Document & {
     caretPositionFromPoint?: (x: number, y: number) => { offsetNode: Node; offset: number } | null;
     caretRangeFromPoint?: (x: number, y: number) => Range | null;
   }) | undefined;
 
   if (!documentRef) {
-    return fallback;
+    return { rawIndex: fallback, slotPath: null };
   }
 
   const caretPositionFromPoint = documentRef.caretPositionFromPoint;
@@ -365,26 +376,43 @@ function resolveRawIndexFromPoint(root: HTMLElement, clientX: number, clientY: n
     offset = range?.startOffset ?? 0;
   }
 
+  const slotElement =
+    documentRef.elementFromPoint?.(clientX, clientY)?.closest?.<HTMLElement>("[data-slot-path]") ?? null;
+
   const anchor =
     node?.nodeType === globalThis.Node.TEXT_NODE
       ? node.parentElement?.closest<HTMLElement>("[data-raw-start]")
       : (node as Element | null)?.closest?.<HTMLElement>("[data-raw-start]") ?? null;
 
+  if (!anchor && slotElement) {
+    const hits = Array.from(slotElement.querySelectorAll<HTMLElement>("[data-raw-start]"));
+    if (hits.length) {
+      const rawStart = Math.min(...hits.map((hit) => Number(hit.dataset.rawStart ?? fallback)));
+      const rawEnd = Math.max(...hits.map((hit) => Number(hit.dataset.rawEnd ?? fallback)));
+      const rect = slotElement.getBoundingClientRect();
+      return {
+        rawIndex: clientX <= rect.left + rect.width / 2 ? rawStart : rawEnd,
+        slotPath: slotElement.dataset.slotPath ?? null,
+      };
+    }
+  }
+
   if (!anchor) {
     const rect = root.getBoundingClientRect();
-    return clientX <= rect.left + rect.width / 2 ? 0 : fallback;
+    return { rawIndex: clientX <= rect.left + rect.width / 2 ? 0 : fallback, slotPath: null };
   }
 
   const rawStart = Number(anchor.dataset.rawStart ?? fallback);
   const rawEnd = Number(anchor.dataset.rawEnd ?? fallback);
   const displayLength = Number(anchor.dataset.displayLength ?? Array.from(anchor.textContent ?? "").length);
+  const slotPath = anchor.closest<HTMLElement>("[data-slot-path]")?.dataset.slotPath ?? slotElement?.dataset.slotPath ?? null;
 
   if (node?.nodeType === globalThis.Node.TEXT_NODE) {
-    return toRawOffset(offset, rawStart, rawEnd, displayLength);
+    return { rawIndex: toRawOffset(offset, rawStart, rawEnd, displayLength), slotPath };
   }
 
   const rect = anchor.getBoundingClientRect();
-  return clientX <= rect.left + rect.width / 2 ? rawStart : rawEnd;
+  return { rawIndex: clientX <= rect.left + rect.width / 2 ? rawStart : rawEnd, slotPath };
 }
 
 function PrettyExpressionComponent({
@@ -406,14 +434,14 @@ function PrettyExpressionComponent({
         onPointerDown
           ? (event) => {
               event.preventDefault();
-              const rawIndex = resolveRawIndexFromPoint(event.currentTarget, event.clientX, event.clientY, expression.length);
-              onPointerDown(rawIndex, event);
+              const target = resolvePointerTargetFromPoint(event.currentTarget, event.clientX, event.clientY, expression.length);
+              onPointerDown(target, event);
             }
           : undefined
       }
       role="presentation"
     >
-      {renderNode(model, selection, "root")}
+      {renderNode(model, selection, "root", "root")}
     </span>
   );
 }

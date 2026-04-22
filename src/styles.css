@@ -229,11 +229,11 @@ button {
   align-items: flex-start;
   justify-content: space-between;
   width: 100%;
-  min-height: 58px;
+  min-height: 64px;
   border: 1px solid #cbd5e1;
   border-radius: 12px;
   background: #ffffff;
-  padding: 10px 12px 11px;
+  padding: 11px 12px 12px;
   color: #0f172a;
   text-align: left;
 }
@@ -247,7 +247,7 @@ button {
   align-items: flex-start;
   min-width: 0;
   flex: 1;
-  min-height: 28px;
+  min-height: 34px;
   overflow: visible;
 }
 
@@ -312,12 +312,12 @@ button {
 
 .select-expression-preview {
   display: inline-flex;
-  align-items: flex-start;
+  align-items: baseline;
   gap: 8px;
   width: 100%;
   min-width: 0;
   max-width: 100%;
-  padding: 4px 0;
+  padding: 6px 0;
 }
 
 .select-expression-preview-compact {
@@ -329,8 +329,8 @@ button {
   color: #334155;
   font-size: 13px;
   font-weight: 600;
-  line-height: 1.5;
-  padding-top: 5px;
+  line-height: 1.45;
+  padding-top: 3px;
   white-space: nowrap;
 }
 
@@ -380,6 +380,8 @@ button {
   height: 18px;
   border: none;
   border-radius: 999px;
+  cursor: pointer;
+  box-shadow: inset 0 0 0 2px rgba(255, 255, 255, 0.86), 0 0 0 1px rgba(148, 163, 184, 0.32);
 }
 
 .expression-input {
@@ -409,8 +411,8 @@ button {
   display: flex;
   align-items: flex-start;
   gap: 12px;
-  min-height: 64px;
-  padding: 6px 0;
+  min-height: 68px;
+  padding: 8px 0 6px;
   color: #0f172a;
   user-select: none;
 }
@@ -432,7 +434,7 @@ button {
 .expression-editor-prefix {
   border: none;
   background: transparent;
-  padding: 4px 0 0;
+  padding: 2px 0 0;
 }
 
 .expression-editor-pretty,
@@ -530,7 +532,7 @@ button {
   border-radius: 999px;
   animation: expression-caret-blink 1s steps(1, end) infinite;
   vertical-align: baseline;
-  transform: translateY(0.08em);
+  transform: translateY(0.14em);
 }
 
 .pretty-expression-placeholder {
@@ -558,10 +560,10 @@ button {
 .pretty-expression-power-exponent {
   display: inline-flex;
   align-items: flex-start;
-  min-width: 0.38em;
+  min-width: 0.42em;
   font-size: 0.72em;
-  line-height: 1;
-  transform: translateY(-0.4em);
+  line-height: 1.05;
+  transform: translateY(-0.38em);
   margin-left: 0.04em;
 }
 
@@ -572,11 +574,11 @@ button {
 
 .pretty-expression-fraction {
   display: inline-grid;
-  grid-template-rows: minmax(1.08em, auto) auto minmax(1.62em, auto);
+  grid-template-rows: minmax(1.12em, auto) auto minmax(1.78em, auto);
   align-items: start;
   justify-items: center;
   min-width: 1.3em;
-  row-gap: 0.06em;
+  row-gap: 0.08em;
   margin: 0 0.08em;
   vertical-align: middle;
 }
@@ -598,8 +600,8 @@ button {
 
 .pretty-expression-fraction-denominator {
   font-size: 0.82em;
-  min-height: 1.48em;
-  padding: 0.24em 0.14em 0.04em;
+  min-height: 1.66em;
+  padding: 0.3em 0.14em 0.08em;
 }
 
 .pretty-expression-fraction-line {
@@ -609,7 +611,7 @@ button {
 }
 
 .pretty-expression-fraction-denominator .pretty-expression-power-exponent {
-  transform: translateY(-0.34em);
+  transform: translateY(-0.38em);
 }
 
 .pretty-expression-function-inverse {
@@ -628,6 +630,13 @@ button {
   line-height: 1;
   transform: translateY(0.28em);
   margin: 0 0.06em 0 0.04em;
+}
+
+.pretty-expression-log-base-value {
+  display: inline-flex;
+  align-items: baseline;
+  min-width: 0;
+  margin-left: 0.04em;
 }
 
 .expression-display {
@@ -662,12 +671,12 @@ button {
   flex-wrap: nowrap;
   overflow: visible;
   white-space: nowrap;
-  line-height: 1.42;
+  line-height: 1.48;
 }
 
 .select-expression-math .pretty-expression,
 .select-expression-math .pretty-expression-compact {
-  font-size: 15px;
+  font-size: 15.5px;
 }
 
 .expression-display-text {
@@ -696,6 +705,27 @@ button {
   color: #be123c;
   font-size: 12px;
   line-height: 1.5;
+}
+
+.expression-color-picker {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 10px;
+  padding-left: 30px;
+}
+
+.expression-color-option {
+  width: 20px;
+  height: 20px;
+  border: none;
+  border-radius: 999px;
+  cursor: pointer;
+  box-shadow: inset 0 0 0 2px rgba(255, 255, 255, 0.86), 0 0 0 1px rgba(148, 163, 184, 0.42);
+}
+
+.expression-color-option-active {
+  box-shadow: inset 0 0 0 2px rgba(255, 255, 255, 0.92), 0 0 0 2px #1d4ed8;
 }
 
 .keyboard-groups {

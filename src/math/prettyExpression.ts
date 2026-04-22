@@ -113,6 +113,7 @@ const FUNCTION_META: Record<string, FunctionMeta> = {
   atanh: { label: "tanh", inverse: true },
   exp: { label: "exp" },
   ln: { label: "ln" },
+  lg: { label: "lg" },
   log: { label: "log" },
   sqrt: { label: "\u221a", functionType: "sqrt" },
   abs: { label: "| |", functionType: "abs" },
