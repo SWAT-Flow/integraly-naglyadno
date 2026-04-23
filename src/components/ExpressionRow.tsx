@@ -35,20 +35,6 @@ function readSelection(input: HTMLInputElement | null, fallback: number) {
   };
 }
 
-function rawIndexFromElementHit(anchor: HTMLElement, clientX: number, fallback: number) {
-  const rawStart = Number(anchor.dataset.rawStart ?? fallback);
-  const rawEnd = Number(anchor.dataset.rawEnd ?? fallback);
-  const displayLength = Number(anchor.dataset.displayLength ?? Array.from(anchor.textContent ?? "").length);
-
-  if (displayLength <= 0 || rawEnd <= rawStart) {
-    return clientX <= anchor.getBoundingClientRect().left + anchor.getBoundingClientRect().width / 2 ? rawStart : rawEnd;
-  }
-
-  const rect = anchor.getBoundingClientRect();
-  const ratio = rect.width > 0 ? (clientX - rect.left) / rect.width : 0;
-  return Math.min(rawEnd, Math.max(rawStart, Math.round(rawStart + ratio * (rawEnd - rawStart))));
-}
-
 function ExpressionRowComponent({
   expression,
   active,
@@ -176,55 +162,6 @@ function ExpressionRowComponent({
     pendingSelectionRef.current = nextState;
     onChange(raw);
   };
-
-  useLayoutEffect(() => {
-    if (!active || !isEditing) {
-      return;
-    }
-
-    const root = rowRef.current?.querySelector<HTMLElement>(".expression-editor-pretty");
-    if (!root) {
-      return;
-    }
-
-    const handleMathPointer = (event: PointerEvent | MouseEvent) => {
-      const target = event.target instanceof Element ? event.target : null;
-      if (!target || !root.contains(target)) {
-        return;
-      }
-
-      const slotElement = target.closest<HTMLElement>("[data-slot-path]");
-      const anchor = target.closest<HTMLElement>("[data-raw-start]");
-      let rawIndex: number | null = anchor ? rawIndexFromElementHit(anchor, event.clientX, expression.text.length) : null;
-
-      if (rawIndex === null && slotElement) {
-        const allHits = Array.from(slotElement.querySelectorAll<HTMLElement>("[data-raw-start]"));
-        const visibleHits = allHits.filter((hit) => Number(hit.dataset.displayLength ?? Array.from(hit.textContent ?? "").length) > 0);
-        const hits = visibleHits.length ? visibleHits : allHits;
-        if (hits.length) {
-          const rawStart = Math.min(...hits.map((hit) => Number(hit.dataset.rawStart ?? expression.text.length)));
-          const rawEnd = Math.max(...hits.map((hit) => Number(hit.dataset.rawEnd ?? expression.text.length)));
-          const rect = slotElement.getBoundingClientRect();
-          rawIndex = event.clientX <= rect.left + rect.width / 2 ? rawStart : rawEnd;
-        }
-      }
-
-      if (rawIndex === null) {
-        const rect = root.getBoundingClientRect();
-        rawIndex = event.clientX <= rect.left + rect.width / 2 ? 0 : expression.text.length;
-      }
-
-      event.preventDefault();
-      setRawSelection(rawIndex, rawIndex, slotElement?.dataset.slotPath ?? null, null, true);
-    };
-
-    root.addEventListener("pointerdown", handleMathPointer, true);
-    root.addEventListener("mousedown", handleMathPointer, true);
-    return () => {
-      root.removeEventListener("pointerdown", handleMathPointer, true);
-      root.removeEventListener("mousedown", handleMathPointer, true);
-    };
-  }, [active, expression.text, isEditing]);
 
   return (
     <div ref={rowRef} className={`expression-row ${active ? "expression-row-active" : ""}`}>

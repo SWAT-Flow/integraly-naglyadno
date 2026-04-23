@@ -16,7 +16,7 @@ function unaryTemplate(name: string): TemplateInsert {
 }
 
 function binaryTemplate(name: string): TemplateInsert {
-  return { text: `${name}(, )`, cursorOffset: -3 };
+  return { text: `${name}(,)`, cursorOffset: -2 };
 }
 
 const GROUPS: Array<{ title: string; items: Array<{ label: string; template: TemplateInsert }> }> = [

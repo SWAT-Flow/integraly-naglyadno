@@ -409,10 +409,10 @@ button {
 
 .expression-editor-display {
   display: flex;
-  align-items: flex-start;
+  align-items: center;
   gap: 12px;
-  min-height: 68px;
-  padding: 8px 0 6px;
+  min-height: 64px;
+  padding: 6px 0;
   color: #0f172a;
   user-select: none;
 }
@@ -434,7 +434,7 @@ button {
 .expression-editor-prefix {
   border: none;
   background: transparent;
-  padding: 2px 0 0;
+  padding: 0;
 }
 
 .expression-editor-pretty,
@@ -526,14 +526,14 @@ button {
 
 .pretty-expression-caret {
   display: inline-block;
-  width: 2px;
-  height: 1.32em;
-  margin: 0 -1px;
+  width: 1.5px;
+  height: 1.12em;
+  margin: 0 -0.75px;
   background: #020617;
   border-radius: 999px;
   animation: expression-caret-blink 1s steps(1, end) infinite;
   vertical-align: baseline;
-  transform: translateY(0.08em);
+  transform: translateY(0.05em);
 }
 
 .pretty-expression-placeholder {

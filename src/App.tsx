@@ -31,6 +31,19 @@ function createExpression(seed = "", index = 0): ExpressionDraft {
   };
 }
 
+function startsWithMathAtom(value: string): boolean {
+  return /^[a-z0-9(]/i.test(value);
+}
+
+function needsImplicitProductBeforeTemplate(source: string, insertAt: number, templateText: string): boolean {
+  if (insertAt <= 0 || !startsWithMathAtom(templateText)) {
+    return false;
+  }
+
+  const previous = source[insertAt - 1] ?? "";
+  return /[a-z0-9)]/i.test(previous);
+}
+
 function buildExpressionModels(expressions: ExpressionDraft[]): {
   rows: ExpressionViewModel[];
   compiled: CompiledExpression[];
@@ -189,8 +202,9 @@ export default function App() {
       cursorOffset = 0;
     }
 
-    const updated = `${source.slice(0, start)}${nextText}${source.slice(end)}`;
-    const nextCursor = start + nextText.length + cursorOffset;
+    const prefix = needsImplicitProductBeforeTemplate(source, start, nextText) ? "*" : "";
+    const updated = `${source.slice(0, start)}${prefix}${nextText}${source.slice(end)}`;
+    const nextCursor = start + prefix.length + nextText.length + cursorOffset;
 
     setExpressions((current) =>
       current.map((expression) =>
