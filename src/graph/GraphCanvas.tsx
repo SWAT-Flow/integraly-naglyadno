@@ -61,6 +61,33 @@ function formatCoordinate(value: number): string {
   return value.toFixed(digits).replace(/\.?0+$/, "");
 }
 
+function isStableVisibleIntersection(
+  leftExpression: CompiledExpression,
+  rightExpression: CompiledExpression,
+  x: number,
+  y: number,
+  view: ViewBox,
+): boolean {
+  const span = Math.max(1e-3, view.xMax - view.xMin);
+  const epsilon = Math.max(1e-5, span / 4000);
+  const xBefore = x - epsilon;
+  const xAfter = x + epsilon;
+  const leftBefore = leftExpression.evaluate(xBefore);
+  const leftAfter = leftExpression.evaluate(xAfter);
+  const rightBefore = rightExpression.evaluate(xBefore);
+  const rightAfter = rightExpression.evaluate(xAfter);
+
+  if (![leftBefore, leftAfter, rightBefore, rightAfter].every(Number.isFinite)) {
+    return false;
+  }
+
+  const localScale = Math.max(1, Math.abs(y), Math.abs(leftBefore), Math.abs(leftAfter), Math.abs(rightBefore), Math.abs(rightAfter));
+  const leftJump = Math.abs(leftAfter - leftBefore);
+  const rightJump = Math.abs(rightAfter - rightBefore);
+
+  return leftJump <= localScale * 6 && rightJump <= localScale * 6;
+}
+
 function buildAutoIntersectionPoints(expressions: CompiledExpression[], view: ViewBox, limit = 10): AutoIntersectionPoint[] {
   const yExpressions = expressions.filter((expression) => expression.orientation === "yOfX");
   const points: AutoIntersectionPoint[] = [];
@@ -79,6 +106,9 @@ function buildAutoIntersectionPoints(expressions: CompiledExpression[], view: Vi
       for (const x of roots) {
         const y = leftExpression.evaluate(x);
         if (!Number.isFinite(y)) {
+          continue;
+        }
+        if (!isStableVisibleIntersection(leftExpression, rightExpression, x, y, view)) {
           continue;
         }
 
@@ -392,6 +422,36 @@ function drawPoints(
   const { padding } = geometry;
   context.save();
   context.font = "12px ui-sans-serif, system-ui, sans-serif";
+  context.textBaseline = "middle";
+
+  const drawLabel = (text: string, left: number, baselineY: number, accent: string) => {
+    const metrics = context.measureText(text);
+    const width = Math.ceil(metrics.width) + 12;
+    const height = 22;
+    const x = clamp(left, padding.left + 6, size.width - padding.right - width - 6);
+    const y = clamp(baselineY - height / 2, padding.top + 6, size.height - padding.bottom - height - 6);
+
+    context.save();
+    context.fillStyle = "rgba(255, 255, 255, 0.94)";
+    context.strokeStyle = accent;
+    context.lineWidth = 1;
+    context.beginPath();
+    context.moveTo(x + 6, y);
+    context.lineTo(x + width - 6, y);
+    context.quadraticCurveTo(x + width, y, x + width, y + 6);
+    context.lineTo(x + width, y + height - 6);
+    context.quadraticCurveTo(x + width, y + height, x + width - 6, y + height);
+    context.lineTo(x + 6, y + height);
+    context.quadraticCurveTo(x, y + height, x, y + height - 6);
+    context.lineTo(x, y + 6);
+    context.quadraticCurveTo(x, y, x + 6, y);
+    context.closePath();
+    context.fill();
+    context.stroke();
+    context.fillStyle = COLORS.ink;
+    context.fillText(text, x + 6, y + height / 2 + 0.5);
+    context.restore();
+  };
 
   for (const point of points) {
     if (
@@ -411,12 +471,7 @@ function drawPoints(
     context.fill();
 
     if (point.label) {
-      context.fillStyle = COLORS.slate;
-      context.fillText(
-        point.label,
-        clamp(x + 7, padding.left + 4, size.width - 120),
-        clamp(y - 8, padding.top + 12, size.height - padding.bottom - 8),
-      );
+      drawLabel(point.label, x + 8, y - 14, point.color ?? COLORS.violet);
     }
   }
 

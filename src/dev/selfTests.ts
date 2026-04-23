@@ -90,6 +90,7 @@ export function runSelfTests(): SelfTestResult[] {
   const prettyPowerFraction = snapshotPrettyExpression(buildPrettyExpression("1/x^2"));
   const prettyGroupedDenominatorFraction = snapshotPrettyExpression(buildPrettyExpression("1/(x^2+1)"));
   const prettyGroupedLinearFraction = snapshotPrettyExpression(buildPrettyExpression("1/(x+1)"));
+  const prettyComplexExponentFraction = snapshotPrettyExpression(buildPrettyExpression("1/(x^(2+x))"));
   const prettyGroupedFraction = snapshotPrettyExpression(buildPrettyExpression("(x+1)/(x-1)"));
   const prettyPi = snapshotPrettyExpression(buildPrettyExpression("pi"));
   const prettySqrt = snapshotPrettyExpression(buildPrettyExpression("sqrt(x)"));
@@ -106,12 +107,16 @@ export function runSelfTests(): SelfTestResult[] {
   const prettyDanglingPowerGroup = snapshotPrettyExpression(buildPrettyExpression("x^("));
   const prettyDanglingPowerGroupSum = snapshotPrettyExpression(buildPrettyExpression("x^(n+"));
   const typedGroupedDenominator = simulateMathFieldInput(["1", "/", "x", "^", "2", "+", "1"]);
+  const typedHeldExponent = simulateMathFieldInput(["x", "^", "2", "+", "2"]);
   const typedLinearDenominator = simulateMathFieldInput(["1", "/", "x", "+", "1"]);
   const typedSqrtDenominator = simulateMathFieldInput(Array.from("1/sqrt(x)+1"));
+  const typedBareSqrt = simulateMathFieldInput(Array.from("sqrtx+1"));
   const typedTrigDenominator = simulateMathFieldInput(Array.from("1/sin(x)+cos(x)"));
+  const typedComplexExponent = simulateMathFieldInput(["1", "/", "x", "^", "(", "2", "+", "x", ")"]);
   const typedSimpleFraction = simulateMathFieldInput(["1", "/", "x", "^", "2"]);
   const typedEPi = simulateMathFieldInput(["e", "p", "i"]);
   const typedPiPi = simulateMathFieldInput(["p", "i", "p", "i"]);
+  const typedPiSqrt = simulateMathFieldInput(Array.from("pisqrt(x)"));
   const exponentExit = moveMathFieldSelection(typedSimpleFraction.raw, typedSimpleFraction.state, "right");
   const denominatorExit = exponentExit ? moveMathFieldSelection(typedSimpleFraction.raw, exponentExit, "right") : null;
   const outsidePlus = denominatorExit ? applyMathFieldCharacter(typedSimpleFraction.raw, denominatorExit, "+") : null;
@@ -123,6 +128,7 @@ export function runSelfTests(): SelfTestResult[] {
   const reciprocalExpression = makeCompiledExpression("reciprocal-test", "1 / x");
   const reciprocalSquaredExpression = makeCompiledExpression("reciprocal-squared-test", "1 / x^2");
   const reciprocalCubedExpression = makeCompiledExpression("reciprocal-cubed-test", "1 / x^3");
+  const regularPlusTwoExpression = makeCompiledExpression("regular-plus-two-test", "1 / (x^2 + 1) + 2");
   const sincExpression = makeCompiledExpression("sinc-test", "sin(x) / x");
   const absSincExpression = makeCompiledExpression("abs-sinc-test", "abs(sin(x) / x)");
   const sineExpression = makeCompiledExpression("sine-test", "sin(x)");
@@ -302,6 +308,22 @@ export function runSelfTests(): SelfTestResult[] {
           new Map([["sideways-test", sidewaysExpression]]),
         )
       : null;
+  const zeroVolumeOverlay = buildOverlay(
+    { mode: "volume", exprA: "f", exprB: "f", a: 0, b: 2, n: 5, sample: "mid" },
+    validExpressions,
+    validMap,
+  );
+  const singularDivergentVolumeOverlay =
+    regularPlusTwoExpression !== null && reciprocalCubedExpression !== null
+      ? buildOverlay(
+          { mode: "volume", exprA: "regular-plus-two-test", exprB: "reciprocal-cubed-test", a: -3, b: 3, n: 6, sample: "mid" },
+          [regularPlusTwoExpression, reciprocalCubedExpression],
+          new Map([
+            ["regular-plus-two-test", regularPlusTwoExpression],
+            ["reciprocal-cubed-test", reciprocalCubedExpression],
+          ]),
+        )
+      : null;
   const infiniteRiemannOverlay =
     reciprocalExpression !== null
       ? buildOverlay(
@@ -426,6 +448,7 @@ export function runSelfTests(): SelfTestResult[] {
           new Map([["abs-sinc-test", absSincExpression]]),
         )
       : null;
+  const averageModule = LEARNING_MODULES.find((module) => module.id === "average-value") ?? null;
   const allPracticeItems = LEARNING_MODULES.flatMap((module) =>
     module.sections.flatMap((section) => (section.type === "practice" ? section.items : [])),
   );
@@ -473,6 +496,10 @@ export function runSelfTests(): SelfTestResult[] {
       prettyGroupedLinearFraction === "frac(1|group(seq(x + 1)))",
     ),
     pass(
+      `pretty renderer builds 1/(x^(2+x)) with a grouped exponent inside the denominator`,
+      prettyComplexExponentFraction === "frac(1|group(pow(x|group(seq(2 + x)))))",
+    ),
+    pass(
       `pretty renderer builds (x+1)/(x-1) as grouped fraction`,
       prettyGroupedFraction === "frac(group(seq(x + 1))|group(seq(x − 1)))",
     ),
@@ -501,12 +528,16 @@ export function runSelfTests(): SelfTestResult[] {
     pass(`parseExpressionInputText restores superscripts`, parseExpressionInputText("x\u00b2") === "x^2"),
     pass(`parseExpressionInputText restores exponent placeholder`, parseExpressionInputText("x\u200a") === "x^"),
     pass(`parseExpressionInputText restores simple fraction`, parseExpressionInputText("\u00b9\u2044\u2093") === "1/x"),
-    pass(`slot-aware input keeps 1 / x ^ 2 + 1 inside the denominator`, typedGroupedDenominator.raw === "1/(x^2+1)"),
+    pass(`slot-aware input keeps operators inside an active exponent until explicit exit`, typedHeldExponent.raw === "x^(2+2)"),
+    pass(`slot-aware input keeps 1 / x ^ 2 + 1 inside the active exponent before explicit exit`, typedGroupedDenominator.raw === "1/(x^(2+1))"),
     pass(`slot-aware input keeps 1 / x + 1 inside the denominator`, typedLinearDenominator.raw === "1/(x+1)"),
     pass(`slot-aware input keeps 1 / sqrt(x) + 1 inside the denominator`, typedSqrtDenominator.raw === "1/(sqrt(x)+1)"),
+    pass(`slot-aware input turns typed sqrt into a root slot`, typedBareSqrt.raw === "sqrt(x+1)"),
     pass(`slot-aware input keeps 1 / sin(x) + cos(x) inside the denominator`, typedTrigDenominator.raw === "1/(sin(x)+cos(x))"),
+    pass(`slot-aware input keeps 1 / x ^ (2+x) as a grouped exponent inside the denominator`, typedComplexExponent.raw === "1/(x^(2+x))"),
     pass(`slot-aware input separates e and pi into distinct tokens`, typedEPi.raw === "e*pi"),
     pass(`slot-aware input separates pi and pi into distinct tokens`, typedPiPi.raw === "pi*pi"),
+    pass(`slot-aware input separates pi and sqrt into distinct factors`, typedPiSqrt.raw === "pi*sqrt(x)"),
     pass(
       `arrow right exits exponent before leaving the denominator`,
       exponentExit?.activeSlotPath === "root/den" && denominatorExit?.activeSlotPath === null,
@@ -521,11 +552,11 @@ export function runSelfTests(): SelfTestResult[] {
         "root/den/content/exp",
     ),
     pass(
-      `formatExpressionText renders sqrt(x) as root with brackets`,
-      formatExpressionText("sqrt(x)") === "\u221a(x)",
+      `formatExpressionText renders sqrt(x) as a root without parser brackets`,
+      formatExpressionText("sqrt(x)") === "\u221ax",
     ),
     pass(`formatExpressionText keeps pretty sqrt for "sqrt("`, formatExpressionText("sqrt(") === "\u221a("),
-    pass(`formatExpressionText keeps pretty sqrt for "sqrt()"`, formatExpressionText("sqrt()") === "\u221a()"),
+    pass(`formatExpressionText keeps pretty sqrt for "sqrt()"`, formatExpressionText("sqrt()") === "\u221a"),
     pass(
       `formatExpressionText renders acos as inverse cosine`,
       formatExpressionText("acos(x)") === "cos\u207b\u00b9 x",
@@ -811,14 +842,25 @@ export function runSelfTests(): SelfTestResult[] {
         (washersVolumeOverlay.volumePreview?.sampleInnerR ?? 0) > 0,
     ),
     pass(
+      `volume keeps equal radii as a compact zero-volume case without preview`,
+      zeroVolumeOverlay.metrics.some((metric) => metric.label === "Объём" && metric.value === "0") &&
+        zeroVolumeOverlay.volumePreview === null,
+    ),
+    pass(
       `volume rejects unsupported x=f(y) input without preview`,
       unsupportedVolumeOverlay !== null &&
         unsupportedVolumeOverlay.volumePreview === null &&
         unsupportedVolumeOverlay.metrics.length > 0,
     ),
     pass(
+      `volume hides preview for an internal singularity that makes the radius blow up`,
+      singularDivergentVolumeOverlay !== null &&
+        singularDivergentVolumeOverlay.metrics.some((metric) => metric.label === "Объём" && metric.value === divergentValue) &&
+        singularDivergentVolumeOverlay.volumePreview === null,
+    ),
+    pass(
       `average value overlay computes mean and returns guide line`,
-      averageOverlay.metrics.some((metric) => metric.label === "\u0421\u0440\u0435\u0434\u043d\u0435\u0435 \u0437\u043d\u0430\u0447\u0435\u043d\u0438\u0435" && metric.value === "1") &&
+      averageOverlay.metrics.some((metric) => metric.label === "\u0422\u0435\u043e\u0440\u0435\u043c\u0430 \u043e \u0441\u0440\u0435\u0434\u043d\u0435\u043c" && metric.value === "1") &&
         averageOverlay.polylines.length > 0,
     ),
     pass(
@@ -829,7 +871,7 @@ export function runSelfTests(): SelfTestResult[] {
       `average value marks 1/x on [0,3] as divergent`,
       reciprocalAverageOverlay !== null &&
         reciprocalAverageOverlay.metrics.some(
-          (metric) => metric.label === "Среднее значение" && metric.value === divergentValue,
+          (metric) => metric.label === "Теорема о среднем" && metric.value === divergentValue,
         ) &&
         reciprocalAverageOverlay.polylines.length === 0,
     ),
@@ -837,7 +879,7 @@ export function runSelfTests(): SelfTestResult[] {
       `average value marks 1/x^2 on [-3,3] as divergent`,
       reciprocalSquaredAverageOverlay !== null &&
         reciprocalSquaredAverageOverlay.metrics.some(
-          (metric) => metric.label === "Среднее значение" && metric.value === divergentValue,
+          (metric) => metric.label === "Теорема о среднем" && metric.value === divergentValue,
         ) &&
         reciprocalSquaredAverageOverlay.regions.length === 0,
     ),
@@ -847,9 +889,18 @@ export function runSelfTests(): SelfTestResult[] {
         reciprocalSquaredAverageOverlay.formulaSteps.every((step) => !step.includes("\\frac{\\text{расходится}}")),
     ),
     pass(
-      `average value formula emphasizes f_avg(b-a)=integral`,
-      averageOverlay.formulaSteps.some((step) => step.includes("f_{\\text{avg}}") && step.includes("\\int")) &&
+      `average value formula emphasizes integral = f_ср(b-a)`,
+      averageOverlay.formulaSteps.some((step) => step.includes("f_{\\text{ср}}") && step.includes("\\int")) &&
         averageOverlay.formulaSteps.every((step) => !step.includes("\\frac{1}{")),
+    ),
+    pass(
+      `average value module starts from the area-equivalence formula`,
+      averageModule !== null &&
+        averageModule.sections.some(
+          (section) =>
+            section.type === "formula" &&
+            section.tex === "\\int_a^b f(x)\\,dx = f_{\\text{ср}}(b-a)",
+        ),
     ),
     pass(
       `newton-leibniz overlay stays safe and returns formula steps`,

@@ -202,6 +202,7 @@ export default function App() {
       const nextInput = inputRefs.current[targetId];
       nextInput?.focus();
       nextInput?.setSelectionRange(nextCursor, nextCursor);
+      nextInput?.dispatchEvent(new Event("select", { bubbles: true }));
     });
 
     return true;

@@ -548,6 +548,13 @@ function isBoundarySingular(
     const tail = samples.slice(-3);
     const spread = Math.max(...tail) - Math.min(...tail);
     const scale = Math.max(1, ...tail.map((value) => Math.abs(value)));
+    const increasingMagnitude = tail.every(
+      (value, index) => index === 0 || Math.abs(value) >= Math.abs(tail[index - 1]) * 0.995,
+    );
+    const tailDrift = Math.abs(tail[tail.length - 1] - tail[0]);
+    if (increasingMagnitude && tailDrift > Math.max(1, scale * 0.08)) {
+      return null;
+    }
     return spread < Math.max(0.02, scale * 0.03) ? tail[tail.length - 1] : null;
   };
 
@@ -635,6 +642,14 @@ function truncatedSequenceConverges(values: number[]): boolean {
   }
 
   const scale = Math.max(1, ...tailValues.map((value) => Math.abs(value)));
+  const increasingMagnitude = tailValues.every(
+    (value, index) => index === 0 || Math.abs(value) >= Math.abs(tailValues[index - 1]) * 0.995,
+  );
+  const tailDrift = Math.abs(tailValues[tailValues.length - 1] - tailValues[0]);
+  const persistentDrift = deltas.every((delta) => delta > Math.max(0.05, scale * 0.015));
+  if (increasingMagnitude && tailDrift > Math.max(1, scale * 0.08) && persistentDrift) {
+    return false;
+  }
   const shrinkingTail = deltas.every((delta, index) => index === 0 || delta <= deltas[index - 1] * 0.86);
   const lastDelta = deltas[deltas.length - 1];
 
@@ -697,13 +712,14 @@ function estimateImproperPiece(
     truncatedValues.push(value);
   }
 
-  const converges = truncatedSequenceConverges(truncatedValues);
+  const status = classifyTailSequence(truncatedValues);
+  const converges = status === "converges";
   return {
     interval: [piece.left, piece.right],
     value: converges && truncatedValues.length ? truncatedValues[truncatedValues.length - 1] : Number.NaN,
     converges,
     improper,
-    reason,
+    reason: status === "uncertain" ? "uncertain" : reason,
   };
 }
 
@@ -769,6 +785,10 @@ function integralEstimateTex(estimate: ImproperIntegralEstimate, digits = 5): st
 
 function estimateIsFinite(estimate: ImproperIntegralEstimate): boolean {
   return estimate.converges && Number.isFinite(estimate.value);
+}
+
+function estimateIsZero(estimate: ImproperIntegralEstimate, epsilon = 1e-8): boolean {
+  return estimateIsFinite(estimate) && Math.abs(estimate.value) <= epsilon;
 }
 
 function estimateStatus(estimate: ImproperIntegralEstimate): ImproperStatus {
@@ -1693,14 +1713,14 @@ export function buildOverlay(
           points: [],
           verticals: buildVerticals(a, b),
           metrics: [
-            { label: "\u0421\u0440\u0435\u0434\u043d\u0435\u0435 \u0437\u043d\u0430\u0447\u0435\u043d\u0438\u0435", value: "\u043d\u0435 \u043f\u043e\u0434\u0434\u0435\u0440\u0436\u0438\u0432\u0430\u0435\u0442\u0441\u044f", tone: "amber" },
+            { label: "\u0422\u0435\u043e\u0440\u0435\u043c\u0430 \u043e \u0441\u0440\u0435\u0434\u043d\u0435\u043c", value: "\u043d\u0435 \u043f\u043e\u0434\u0434\u0435\u0440\u0436\u0438\u0432\u0430\u0435\u0442\u0441\u044f", tone: "amber" },
             { label: "\u0418\u043d\u0442\u0435\u0440\u0432\u0430\u043b", value: formatIntervalText(a, b, 3), tone: "slate" },
             statusMetric("\u0421\u0440\u0435\u0434\u043d\u0435\u0435 \u0437\u043d\u0430\u0447\u0435\u043d\u0438\u0435 \u0432 \u0442\u0435\u043a\u0443\u0449\u0435\u043c \u0440\u0435\u0436\u0438\u043c\u0435 \u043e\u043f\u0440\u0435\u0434\u0435\u043b\u044f\u0435\u0442\u0441\u044f \u0442\u043e\u043b\u044c\u043a\u043e \u043d\u0430 \u043a\u043e\u043d\u0435\u0447\u043d\u043e\u043c \u043e\u0442\u0440\u0435\u0437\u043a\u0435."),
           ],
-          formulaTex: `f_{\\text{avg}}(b-a) = \\int_a^b ${expressionA ? expressionToTex(expressionA.normalized) : "f(x)"}\\,dx`,
+          formulaTex: `\\int_a^b ${expressionA ? expressionToTex(expressionA.normalized) : "f(x)"}\\,dx = f_{\\text{ср}}(b-a)`,
           formulaSteps: [
-            `f_{\\text{avg}}(b-a) = \\int_a^b ${expressionA ? expressionToTex(expressionA.normalized) : "f(x)"}\\,dx`,
-            "\\text{Среднее значение в этой модели поддерживается только на конечном отрезке}",
+            `\\int_a^b ${expressionA ? expressionToTex(expressionA.normalized) : "f(x)"}\\,dx = f_{\\text{ср}}(b-a)`,
+            "\\text{Теорема о среднем в этой модели поддерживается только на конечном отрезке}",
           ],
           explanation: [
             "\u0424\u043e\u0440\u043c\u0443\u043b\u0430 \u0441\u0440\u0435\u0434\u043d\u0435\u0433\u043e \u0437\u043d\u0430\u0447\u0435\u043d\u0438\u044f \u0438\u0441\u043f\u043e\u043b\u044c\u0437\u0443\u0435 \u0434\u043b\u0438\u043d\u0443 \u043a\u043e\u043d\u0435\u0447\u043d\u043e\u0433\u043e \u043e\u0442\u0440\u0435\u0437\u043a\u0430.",
@@ -1719,8 +1739,8 @@ export function buildOverlay(
       const averageValue = integralFinite ? integral.value / (b - a) : Number.NaN;
       const averageFinite = integralFinite && Number.isFinite(averageValue);
       const texA = expressionA ? expressionToTex(expressionA.normalized) : "f(x)";
-      const averageFn = () => averageValue;
-      const averageRegion: GraphRegion[] = averageFinite
+        const averageFn = () => averageValue;
+        const averageRegion: GraphRegion[] = averageFinite
         ? [
             {
               x1: a,
@@ -1747,19 +1767,19 @@ export function buildOverlay(
             },
           ]
         : [];
-      const points: GraphPoint[] = averageFinite
-        ? [...snapshot.points, { x: b, y: averageValue, label: `f_avg=${formatNumber(averageValue, 3)}`, color: COLORS.amber, radius: 4 }]
-        : snapshot.points;
-      const formulaSteps = averageFinite
-        ? [
-            `f_{\\text{avg}}\\,${formatNumber(b - a, 3)} = \\int_{${formatBoundTex(a, 3)}}^{${formatBoundTex(b, 3)}} ${texA}\\,dx`,
-            `f_{\\text{avg}}\\,${formatNumber(b - a, 3)} = ${integralEstimateTex(integral)}`,
-            `f_{\\text{avg}} = ${formatNumber(averageValue)}`,
+        const points: GraphPoint[] = averageFinite
+          ? [...snapshot.points, { x: b, y: averageValue, label: `f_ср=${formatNumber(averageValue, 3)}`, color: COLORS.amber, radius: 4 }]
+          : snapshot.points;
+        const formulaSteps = averageFinite
+          ? [
+            `\\int_{${formatBoundTex(a, 3)}}^{${formatBoundTex(b, 3)}} ${texA}\\,dx = ${formatNumber(b - a, 3)}\\cdot f_{\\text{ср}}`,
+            `${integralEstimateTex(integral)} = ${formatNumber(b - a, 3)}\\cdot f_{\\text{ср}}`,
+            `f_{\\text{ср}} = ${formatNumber(averageValue)}`,
           ]
-        : [
-            `f_{\\text{avg}}\\,${formatNumber(b - a, 3)} = \\int_{${formatBoundTex(a, 3)}}^{${formatBoundTex(b, 3)}} ${texA}\\,dx`,
+          : [
+            `\\int_{${formatBoundTex(a, 3)}}^{${formatBoundTex(b, 3)}} ${texA}\\,dx = ${formatNumber(b - a, 3)}\\cdot f_{\\text{ср}}`,
             `\\int_{${formatBoundTex(a, 3)}}^{${formatBoundTex(b, 3)}} ${texA}\\,dx = \\text{расходится}`,
-            "f_{\\text{avg}} \\text{ не существует}",
+            "f_{\\text{ср}} \\text{ не существует}",
           ];
 
       return {
@@ -1770,20 +1790,20 @@ export function buildOverlay(
         verticals: buildVerticals(a, b),
         metrics: withOptionalStatus(
           [
-            { label: "\u0421\u0440\u0435\u0434\u043d\u0435\u0435 \u0437\u043d\u0430\u0447\u0435\u043d\u0438\u0435", value: averageFinite ? formatNumber(averageValue) : "расходится", tone: "amber" },
+            { label: "\u0422\u0435\u043e\u0440\u0435\u043c\u0430 \u043e \u0441\u0440\u0435\u0434\u043d\u0435\u043c", value: averageFinite ? formatNumber(averageValue) : "расходится", tone: "amber" },
             { label: "\u0418\u043d\u0442\u0435\u0433\u0440\u0430\u043b", value: formatIntegralEstimate(integral), tone: "blue" },
             { label: "\u0418\u043d\u0442\u0435\u0440\u0432\u0430\u043b", value: formatIntervalText(a, b, 3), tone: "slate" },
           ],
           "\u041d\u0435 \u0443\u0434\u0430\u043b\u043e\u0441\u044c \u043a\u043e\u0440\u0440\u0435\u043a\u0442\u043d\u043e \u043e\u0446\u0435\u043d\u0438\u0442\u044c \u0441\u0440\u0435\u0434\u043d\u0435\u0435 \u0437\u043d\u0430\u0447\u0435\u043d\u0438\u0435.",
           !averageFinite,
         ),
-        formulaTex: `f_{\\text{avg}}\\,${formatNumber(b - a, 3)} = \\int_{${formatBoundTex(a, 3)}}^{${formatBoundTex(b, 3)}} ${texA}\\,dx`,
+        formulaTex: `\\int_{${formatBoundTex(a, 3)}}^{${formatBoundTex(b, 3)}} ${texA}\\,dx = ${formatNumber(b - a, 3)}\\cdot f_{\\text{ср}}`,
         formulaSteps,
         explanation: averageFinite
           ? [
-              "\u0421\u0440\u0435\u0434\u043d\u0435\u0435 \u0437\u043d\u0430\u0447\u0435\u043d\u0438\u0435 \u0444\u0443\u043d\u043a\u0446\u0438\u0438 \u2014 \u044d\u0442\u043e \u0442\u0430\u043a\u0430\u044f \u0432\u044b\u0441\u043e\u0442\u0430 \u043f\u0440\u044f\u043c\u043e\u0443\u0433\u043e\u043b\u044c\u043d\u0438\u043a\u0430 \u043d\u0430 \u0442\u043e\u043c \u0436\u0435 \u043e\u0441\u043d\u043e\u0432\u0430\u043d\u0438\u0438, \u043f\u0440\u0438 \u043a\u043e\u0442\u043e\u0440\u043e\u0439 \u043f\u043b\u043e\u0449\u0430\u0434\u044c \u0441\u043e\u0432\u043f\u0430\u0434\u0430\u0435\u0442.",
-              "\u0421\u0438\u043d\u044f\u044f/\u0440\u043e\u0437\u043e\u0432\u0430\u044f \u0437\u0430\u043a\u0440\u0430\u0441\u043a\u0430 \u043f\u043e\u043a\u0430\u0437\u044b\u0432\u0430\u0435\u0442 \u043e\u0431\u043b\u0430\u0441\u0442\u044c \u043f\u043e\u0434 \u0433\u0440\u0430\u0444\u0438\u043a\u043e\u043c, \u0430 \u044f\u043d\u0442\u0430\u0440\u043d\u044b\u0439 \u0441\u043b\u043e\u0439 \u2014 \u043f\u0440\u044f\u043c\u043e\u0443\u0433\u043e\u043b\u044c\u043d\u0438\u043a \u0441\u0440\u0435\u0434\u043d\u0435\u0439 \u0432\u044b\u0441\u043e\u0442\u044b.",
-              "\u0412 \u043c\u0435\u0441\u0442\u0430\u0445 \u043d\u0430\u043b\u043e\u0436\u0435\u043d\u0438\u044f \u0441\u043b\u043e\u0451\u0432 \u043f\u043e\u044f\u0432\u043b\u044f\u0435\u0442\u0441\u044f \u0442\u0440\u0435\u0442\u0438\u0439 \u043e\u0442\u0442\u0435\u043d\u043e\u043a, \u043a\u043e\u0442\u043e\u0440\u044b\u0439 \u043d\u0430\u0433\u043b\u044f\u0434\u043d\u043e \u043f\u043e\u043a\u0430\u0437\u044b\u0432\u0430\u0435\u0442 \u0441\u043e\u0432\u043f\u0430\u0434\u0430\u044e\u0449\u0443\u044e \u0447\u0430\u0441\u0442\u044c \u043f\u043b\u043e\u0449\u0430\u0434\u0435\u0439.",
+              "\u0421\u043d\u0430\u0447\u0430\u043b\u0430 \u043c\u044b \u0441\u0440\u0430\u0432\u043d\u0438\u0432\u0430\u0435\u043c \u0434\u0432\u0435 \u043f\u043b\u043e\u0449\u0430\u0434\u0438: \u043f\u043e\u0434 \u0433\u0440\u0430\u0444\u0438\u043a\u043e\u043c \u0438 \u043f\u0440\u044f\u043c\u043e\u0443\u0433\u043e\u043b\u044c\u043d\u0438\u043a\u0430 \u0448\u0438\u0440\u0438\u043d\u044b b-a.",
+              "\u0427\u0438\u0441\u043b\u043e f\u0441\u0440 \u2014 \u044d\u0442\u043e \u0432\u044b\u0441\u043e\u0442\u0430 \u044d\u0442\u043e\u0433\u043e \u043f\u0440\u044f\u043c\u043e\u0443\u0433\u043e\u043b\u044c\u043d\u0438\u043a\u0430. \u0415\u0441\u043b\u0438 \u0444\u0443\u043d\u043a\u0446\u0438\u044f \u043d\u0435\u043f\u0440\u0435\u0440\u044b\u0432\u043d\u0430, \u0442\u043e \u043d\u0430\u0439\u0434\u0451\u0442\u0441\u044f \u0442\u043e\u0447\u043a\u0430 c, \u0433\u0434\u0435 f(c)=f\u0441\u0440, \u043d\u043e c \u0438 f\u0441\u0440 \u2014 \u044d\u0442\u043e \u043d\u0435 \u043e\u0434\u043d\u043e \u0438 \u0442\u043e \u0436\u0435.",
+              "\u0421\u0438\u043d\u044f\u044f/\u0440\u043e\u0437\u043e\u0432\u0430\u044f \u0437\u0430\u043a\u0440\u0430\u0441\u043a\u0430 \u043f\u043e\u043a\u0430\u0437\u044b\u0432\u0430\u0435\u0442 \u043f\u043b\u043e\u0449\u0430\u0434\u044c \u043f\u043e\u0434 \u0433\u0440\u0430\u0444\u0438\u043a\u043e\u043c, \u0430 \u044f\u043d\u0442\u0430\u0440\u043d\u0430\u044f \u2014 \u043f\u0440\u044f\u043c\u043e\u0443\u0433\u043e\u043b\u044c\u043d\u0438\u043a \u0442\u043e\u0439 \u0436\u0435 \u043f\u043b\u043e\u0449\u0430\u0434\u0438.",
             ]
           : [
               "\u0421\u0440\u0435\u0434\u043d\u0435\u0435 \u0437\u043d\u0430\u0447\u0435\u043d\u0438\u0435 \u0444\u0443\u043d\u043a\u0446\u0438\u0438 \u043e\u043f\u0440\u0435\u0434\u0435\u043b\u044f\u0435\u0442\u0441\u044f \u0442\u043e\u043b\u044c\u043a\u043e \u0447\u0435\u0440\u0435\u0437 \u043a\u043e\u043d\u0435\u0447\u043d\u044b\u0439 \u043e\u043f\u0440\u0435\u0434\u0435\u043b\u0451\u043d\u043d\u044b\u0439 \u0438\u043d\u0442\u0435\u0433\u0440\u0430\u043b.",
@@ -1836,6 +1856,7 @@ export function buildOverlay(
         };
         const volumeEstimate = analyzeImproperIntegral(radiusSquare, a, b);
         const volumeFinite = estimateIsFinite(volumeEstimate);
+        const zeroVolume = estimateIsZero(volumeEstimate);
         const finiteBounds = Number.isFinite(a) && Number.isFinite(b);
         const roots = finiteBounds ? findRoots(fnA, a, b) : [];
         const breaks = finiteBounds
@@ -1880,14 +1901,14 @@ export function buildOverlay(
         const sampleOuterR = Number.isFinite(sampleY) ? Math.abs(sampleY) : 0;
 
         return {
-          regions: volumeFinite ? regions : [],
+          regions: volumeFinite && !zeroVolume ? regions : [],
           polygons: [],
           polylines: [],
-          points: volumeFinite && sampleOuterR > 0 ? [{ x: sampleX, y: sampleY, color: COLORS.violet, label: "R" }] : [],
+          points: volumeFinite && !zeroVolume && sampleOuterR > 0 ? [{ x: sampleX, y: sampleY, color: COLORS.violet, label: "R" }] : [],
           verticals: buildVerticals(a, b),
           metrics: [
             { label: "\u041e\u0431\u044a\u0451\u043c", value: volumeFinite ? formatIntegralEstimate(volumeEstimate) : "расходится", tone: "violet" },
-            { label: "\u0420\u0430\u0434\u0438\u0443\u0441 \u0441\u0435\u0447\u0435\u043d\u0438\u044f", value: volumeFinite ? formatNumber(sampleOuterR) : "\u043d\u0435\u0442", tone: "amber" },
+            { label: "\u0420\u0430\u0434\u0438\u0443\u0441 \u0441\u0435\u0447\u0435\u043d\u0438\u044f", value: volumeFinite && !zeroVolume ? formatNumber(sampleOuterR) : "\u043d\u0435\u0442", tone: "amber" },
             { label: "\u0418\u043d\u0442\u0435\u0440\u0432\u0430\u043b", value: intervalLabel, tone: "slate" },
             ...(volumeFinite ? [] : [statusMetric("\u041d\u0435\u0441\u043e\u0431\u0441\u0442\u0432\u0435\u043d\u043d\u044b\u0439 \u0438\u043d\u0442\u0435\u0433\u0440\u0430\u043b \u043e\u0431\u044a\u0451\u043c\u0430 \u043d\u0435 \u043f\u043e\u0434\u0442\u0432\u0435\u0440\u0436\u0434\u0430\u0435\u0442 \u043a\u043e\u043d\u0435\u0447\u043d\u043e\u0435 \u0437\u043d\u0430\u0447\u0435\u043d\u0438\u0435.")]),
           ],
@@ -1895,18 +1916,20 @@ export function buildOverlay(
           formulaSteps: [
             "V = \\pi \\int_a^b f(x)^2\\,dx",
             `V = \\pi \\int_{${formatBoundTex(a, 3)}}^{${formatBoundTex(b, 3)}} ${squareTex(texA)}\\,dx`,
-            volumeFinite ? `V = ${integralEstimateTex(volumeEstimate)}` : "V = \\text{расходится}",
+            volumeFinite ? `V = ${zeroVolume ? "0" : integralEstimateTex(volumeEstimate)}` : "V = \\text{расходится}",
           ],
           explanation: volumeFinite
             ? [
-                "\u041e\u0431\u044a\u0451\u043c \u0441\u0442\u0440\u043e\u0438\u0442\u0441\u044f \u043a\u0430\u043a \u0441\u0443\u043c\u043c\u0430 \u0442\u043e\u043d\u043a\u0438\u0445 \u0434\u0438\u0441\u043a\u043e\u0432 \u0440\u0430\u0434\u0438\u0443\u0441\u0430 |f(x)| \u0432\u043e\u043a\u0440\u0443\u0433 \u043e\u0441\u0438 Ox.",
-                ...buildImproperConvergentExplanation(volumeEstimate),
+                zeroVolume
+                  ? "\u041d\u0430 \u0432\u0441\u0451\u043c \u0438\u043d\u0442\u0435\u0440\u0432\u0430\u043b\u0435 \u0440\u0430\u0434\u0438\u0443\u0441 \u0441\u0435\u0447\u0435\u043d\u0438\u044f \u043e\u043a\u0430\u0437\u0430\u043b\u0441\u044f \u043d\u0443\u043b\u0435\u0432\u044b\u043c, \u043f\u043e\u044d\u0442\u043e\u043c\u0443 \u043e\u0431\u044a\u0451\u043c \u0442\u043e\u0436\u0435 \u0440\u0430\u0432\u0435\u043d \u043d\u0443\u043b\u044e."
+                  : "\u041e\u0431\u044a\u0451\u043c \u0441\u0442\u0440\u043e\u0438\u0442\u0441\u044f \u043a\u0430\u043a \u0441\u0443\u043c\u043c\u0430 \u0442\u043e\u043d\u043a\u0438\u0445 \u0434\u0438\u0441\u043a\u043e\u0432 \u0440\u0430\u0434\u0438\u0443\u0441\u0430 |f(x)| \u0432\u043e\u043a\u0440\u0443\u0433 \u043e\u0441\u0438 Ox.",
+                ...(zeroVolume ? [] : buildImproperConvergentExplanation(volumeEstimate)),
               ]
             : [
                 "\u0414\u043b\u044f \u043e\u0431\u044a\u0451\u043c\u0430 \u0430\u043d\u0430\u043b\u0438\u0437\u0438\u0440\u0443\u0435\u0442\u0441\u044f \u0438\u043c\u0435\u043d\u043d\u043e \u0438\u043d\u0442\u0435\u0433\u0440\u0430\u043b \\pi f(x)^2, \u0430 \u043d\u0435 \u043f\u043b\u043e\u0449\u0430\u0434\u044c.",
                 ...buildImproperFailureExplanation(volumeEstimate),
               ],
-          volumePreview: volumeFinite
+          volumePreview: volumeFinite && !zeroVolume
             ? {
                 a: previewLeft,
                 b: previewRight,
@@ -1917,6 +1940,32 @@ export function buildOverlay(
                 slices,
               }
             : null,
+          };
+      }
+
+      if (expressionA?.normalized === expressionB.normalized) {
+        return {
+          regions: [],
+          polygons: [],
+          polylines: [],
+          points: [],
+          verticals: buildVerticals(a, b),
+          metrics: [
+            { label: "\u041e\u0431\u044a\u0451\u043c", value: "0", tone: "violet" },
+            { label: "\u0422\u0438\u043f \u0441\u0435\u0447\u0435\u043d\u0438\u044f", value: "\u0440\u0430\u0434\u0438\u0443\u0441\u044b \u0441\u043e\u0432\u043f\u0430\u0434\u0430\u044e\u0442", tone: "amber" },
+            { label: "\u0418\u043d\u0442\u0435\u0440\u0432\u0430\u043b", value: intervalLabel, tone: "slate" },
+          ],
+          formulaTex: "V = \\pi \\int_a^b \\left(R(x)^2-r(x)^2\\right)\\,dx",
+          formulaSteps: [
+            "V = \\pi \\int_a^b \\left(R(x)^2-r(x)^2\\right)\\,dx",
+            "\\text{На всём интервале внешний и внутренний радиусы совпадают}",
+            "V = 0",
+          ],
+          explanation: [
+            "\u0415\u0441\u043b\u0438 \u043e\u0431\u0430 \u0440\u0430\u0434\u0438\u0443\u0441\u0430 \u0432\u0435\u0437\u0434\u0435 \u043e\u0434\u0438\u043d\u0430\u043a\u043e\u0432\u044b, \u0448\u0430\u0439\u0431\u0430 \u0432\u044b\u0440\u043e\u0436\u0434\u0430\u0435\u0442\u0441\u044f \u0438 \u043e\u0431\u044a\u0451\u043c \u0440\u0430\u0432\u0435\u043d \u043d\u0443\u043b\u044e.",
+            "\u041f\u043e\u044d\u0442\u043e\u043c\u0443 \u043f\u0440\u0435\u0434\u043f\u0440\u043e\u0441\u043c\u043e\u0442\u0440 \u0437\u0434\u0435\u0441\u044c \u0441\u043a\u0440\u044b\u0442 \u043a\u0430\u043a \u0431\u0435\u0441\u0441\u043c\u044b\u0441\u043b\u0435\u043d\u043d\u044b\u0439.",
+          ],
+          volumePreview: null,
         };
       }
 
@@ -2007,6 +2056,7 @@ export function buildOverlay(
 
       const volumeEstimate = mergeImproperEstimates(segmentEstimates);
       const volumeFinite = estimateIsFinite(volumeEstimate) && segmentEstimates.every(estimateIsFinite);
+      const zeroVolume = estimateIsZero(volumeEstimate);
       const [previewLeft, previewRight] = previewBounds;
       const pickSegment = (x: number) =>
         segments.find((segment, index) => x >= segment.left && (x <= segment.right || index === segments.length - 1)) ?? null;
@@ -2036,10 +2086,10 @@ export function buildOverlay(
         sampleSegment && Number.isFinite(sampleSegment.innerFn(sampleX)) ? Math.abs(sampleSegment.innerFn(sampleX)) : 0;
 
       return {
-        regions: volumeFinite ? regions : [],
+        regions: volumeFinite && !zeroVolume ? regions : [],
         polygons: [],
         polylines: [],
-        points: volumeFinite && sampleSegment
+        points: volumeFinite && !zeroVolume && sampleSegment
           ? [
               { x: sampleX, y: sampleSegment.outerFn(sampleX), color: COLORS.violet, label: "R" },
               ...(sampleInnerR > 0
@@ -2049,10 +2099,10 @@ export function buildOverlay(
           : [],
         verticals: buildVerticals(a, b),
         metrics: [
-          { label: "\u041e\u0431\u044a\u0451\u043c", value: volumeFinite ? formatIntegralEstimate(volumeEstimate) : "расходится", tone: "violet" },
+          { label: "\u041e\u0431\u044a\u0451\u043c", value: volumeFinite ? (zeroVolume ? "0" : formatIntegralEstimate(volumeEstimate)) : "расходится", tone: "violet" },
           {
             label: "\u0422\u0438\u043f \u0441\u0435\u0447\u0435\u043d\u0438\u044f",
-            value: sampleSegment?.section === "washer" ? "\u0448\u0430\u0439\u0431\u0430" : "\u0434\u0438\u0441\u043a",
+            value: zeroVolume ? "\u0440\u0430\u0434\u0438\u0443\u0441\u044b \u0441\u043e\u0432\u043f\u0430\u0434\u0430\u044e\u0442" : sampleSegment?.section === "washer" ? "\u0448\u0430\u0439\u0431\u0430" : "\u0434\u0438\u0441\u043a",
             tone: "amber",
           },
           { label: "\u0418\u043d\u0442\u0435\u0440\u0432\u0430\u043b", value: intervalLabel, tone: "slate" },
@@ -2062,8 +2112,8 @@ export function buildOverlay(
         formulaSteps: volumeFinite
           ? [
               "V = \\pi \\int_a^b \\left(R(x)^2-r(x)^2\\right)\\,dx",
-              ...compactVolumeSegmentSteps(segmentSteps),
-              `V = ${integralEstimateTex(volumeEstimate)}`,
+              ...(zeroVolume ? ["\\text{На всех значимых кусках внешний и внутренний радиусы совпадают}"] : compactVolumeSegmentSteps(segmentSteps)),
+              `V = ${zeroVolume ? "0" : integralEstimateTex(volumeEstimate)}`,
             ]
           : [
               "V = \\pi \\int_a^b \\left(R(x)^2-r(x)^2\\right)\\,dx",
@@ -2072,14 +2122,16 @@ export function buildOverlay(
             ],
         explanation: volumeFinite
           ? [
-              "\u041d\u0430 \u043a\u0430\u0436\u0434\u043e\u043c \u043a\u0443\u0441\u043a\u0435 \u0432\u043d\u0435\u0448\u043d\u0438\u0439 \u0438 \u0432\u043d\u0443\u0442\u0440\u0435\u043d\u043d\u0438\u0439 \u0440\u0430\u0434\u0438\u0443\u0441\u044b \u0431\u0435\u0440\u0443\u0442\u0441\u044f \u043a\u0430\u043a \u0440\u0430\u0441\u0441\u0442\u043e\u044f\u043d\u0438\u044f \u0434\u043e \u043e\u0441\u0438 Ox.",
-              ...buildImproperConvergentExplanation(volumeEstimate),
+              zeroVolume
+                ? "\u041d\u0430 \u0437\u043d\u0430\u0447\u0438\u043c\u044b\u0445 \u043a\u0443\u0441\u043a\u0430\u0445 \u0432\u043d\u0435\u0448\u043d\u0438\u0439 \u0438 \u0432\u043d\u0443\u0442\u0440\u0435\u043d\u043d\u0438\u0439 \u0440\u0430\u0434\u0438\u0443\u0441\u044b \u0441\u043e\u0432\u043f\u0430\u0434\u0430\u044e\u0442, \u043f\u043e\u044d\u0442\u043e\u043c\u0443 \u043e\u0431\u044a\u0451\u043c \u0440\u0430\u0432\u0435\u043d \u043d\u0443\u043b\u044e."
+                : "\u041d\u0430 \u043a\u0430\u0436\u0434\u043e\u043c \u043a\u0443\u0441\u043a\u0435 \u0432\u043d\u0435\u0448\u043d\u0438\u0439 \u0438 \u0432\u043d\u0443\u0442\u0440\u0435\u043d\u043d\u0438\u0439 \u0440\u0430\u0434\u0438\u0443\u0441\u044b \u0431\u0435\u0440\u0443\u0442\u0441\u044f \u043a\u0430\u043a \u0440\u0430\u0441\u0441\u0442\u043e\u044f\u043d\u0438\u044f \u0434\u043e \u043e\u0441\u0438 Ox.",
+              ...(zeroVolume ? [] : buildImproperConvergentExplanation(volumeEstimate)),
             ]
           : [
               "\u041e\u0431\u044a\u0451\u043c \u0447\u0435\u0440\u0435\u0437 \u0448\u0430\u0439\u0431\u044b \u0430\u043d\u0430\u043b\u0438\u0437\u0438\u0440\u0443\u0435\u0442\u0441\u044f \u043a\u0430\u043a improper-\u0438\u043d\u0442\u0435\u0433\u0440\u0430\u043b \u043e\u0442 \\pi(R^2-r^2).",
               ...buildImproperFailureExplanation(volumeEstimate),
             ],
-        volumePreview: volumeFinite
+        volumePreview: volumeFinite && !zeroVolume
           ? {
               a: previewLeft,
               b: previewRight,

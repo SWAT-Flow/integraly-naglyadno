@@ -67,7 +67,7 @@ export function normalizeTool(rawTool: Partial<ToolState>, validExpressions: Com
 
   if (mode === "volume") {
     exprB = rawTool.exprB && availableIds.includes(rawTool.exprB) ? rawTool.exprB : null;
-    if (exprB === exprA && availableIds.length > 1) {
+    if (!rawTool.exprB && exprB === exprA && availableIds.length > 1) {
       exprB = availableIds.find((id) => id !== exprA) ?? null;
     }
   }

@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type PropsWithChildren, type ReactNode } from "react";
+import { useEffect, useRef, useState, type MouseEventHandler, type PropsWithChildren, type ReactNode } from "react";
 import { formatBoundInput, parseBoundInput } from "../math/bounds";
 import type { OverlayMetric } from "../types";
 import { decodeEscapedUnicode } from "../utils/decodeEscapedUnicode";
@@ -27,6 +27,7 @@ export function Card({ title, subtitle, footer, children }: CardProps) {
 interface ButtonProps extends PropsWithChildren {
   active?: boolean;
   onClick?: () => void;
+  onMouseDown?: MouseEventHandler<HTMLButtonElement>;
   type?: "button" | "submit" | "reset";
   disabled?: boolean;
   className?: string;
@@ -35,6 +36,7 @@ interface ButtonProps extends PropsWithChildren {
 export function Button({
   active = false,
   onClick,
+  onMouseDown,
   type = "button",
   disabled = false,
   className = "",
@@ -47,6 +49,7 @@ export function Button({
       className={`button ${active ? "button-active" : ""} ${className}`.trim()}
       disabled={disabled}
       onClick={onClick}
+      onMouseDown={onMouseDown}
       type={type}
     >
       {content}

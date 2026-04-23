@@ -479,6 +479,7 @@ button {
 
 .pretty-expression-sequence,
 .pretty-expression-group,
+.pretty-expression-structural-group,
 .pretty-expression-function,
 .pretty-expression-sqrt,
 .pretty-expression-abs,
@@ -526,13 +527,13 @@ button {
 .pretty-expression-caret {
   display: inline-block;
   width: 2px;
-  height: 1.12em;
+  height: 1.32em;
   margin: 0 -1px;
-  background: #2563eb;
+  background: #020617;
   border-radius: 999px;
   animation: expression-caret-blink 1s steps(1, end) infinite;
   vertical-align: baseline;
-  transform: translateY(0.14em);
+  transform: translateY(0.08em);
 }
 
 .pretty-expression-placeholder {
@@ -621,6 +622,31 @@ button {
   line-height: 1;
   transform: translateY(-0.34em);
   margin-left: 0.03em;
+}
+
+.pretty-expression-sqrt {
+  align-items: flex-start;
+}
+
+.pretty-expression-sqrt-radicand {
+  display: inline-flex;
+  align-items: baseline;
+  min-width: 0.58em;
+  min-height: 1.1em;
+  padding: 0.02em 0.08em 0;
+  border-top: 1.5px solid currentColor;
+  transform: translateY(0.08em);
+}
+
+.pretty-expression-function-slot {
+  align-items: baseline;
+}
+
+.pretty-expression-function-argument-slot {
+  display: inline-flex;
+  align-items: baseline;
+  min-width: 0.55em;
+  margin-left: 0.08em;
 }
 
 .pretty-expression-log-base-subscript {

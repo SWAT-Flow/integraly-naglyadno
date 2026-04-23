@@ -301,8 +301,11 @@ export function findSingularityCandidates(
   }
 
   const epsilon = Math.max(step * 3, 1e-4);
+  const zeroSnapEpsilon = Math.max(step * 0.5, 1e-8);
   return uniqueSorted(
-    candidates.filter((value) => value > left + epsilon && value < right - epsilon),
+    candidates
+      .map((value) => (Math.abs(value) <= zeroSnapEpsilon ? 0 : value))
+      .filter((value) => value > left + epsilon && value < right - epsilon),
     epsilon,
   );
 }

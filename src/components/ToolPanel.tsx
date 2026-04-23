@@ -90,7 +90,7 @@ function currentFormulaTex(tool: ToolState, validExpressions: CompiledExpression
     case "newtonLeibniz":
       return `\\int_{${aTex}}^{${bTex}} ${texA}\\,dx = F(${bTex}) - F(${aTex})`;
     case "averageValue":
-      return `f_{\\text{avg}}\\,(${bTex}-${aTex}) = \\int_{${aTex}}^{${bTex}} ${texA}\\,dx`;
+      return `\\int_{${aTex}}^{${bTex}} ${texA}\\,dx = (${bTex}-${aTex})\\cdot f_{\\text{ср}}`;
     default:
       return null;
   }

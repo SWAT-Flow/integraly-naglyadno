@@ -1,4 +1,4 @@
-import { Fragment, memo, useMemo, type ReactNode } from "react";
+import { Fragment, memo, useLayoutEffect, useMemo, useRef, type ReactNode } from "react";
 import { buildPrettyExpression, type PrettyFunctionNode, type PrettyLeafNode, type PrettyNode } from "../math/prettyExpression";
 import type { MathFieldPointerTarget } from "../math/mathFieldEditing";
 
@@ -6,6 +6,7 @@ interface PrettyExpressionProps {
   expression: string;
   selectionStart?: number;
   selectionEnd?: number;
+  activeSlotPath?: string | null;
   className?: string;
   compact?: boolean;
   onPointerDown?: (target: MathFieldPointerTarget, event: React.PointerEvent<HTMLSpanElement>) => void;
@@ -192,6 +193,47 @@ function renderLeaf(node: PrettyLeafNode, selection: SelectionRange | null, key:
   );
 }
 
+function renderHiddenGroup(
+  node: Extract<PrettyNode, { kind: "group" }>,
+  selection: SelectionRange | null,
+  key: string,
+  path: string,
+  activeSlotPath: string | null,
+) {
+  const slotPath = path.endsWith("/content") ? path.slice(0, -"/content".length) : `${path}/group`;
+  const beforeCaret = activeSlotPath === slotPath && selection?.start === selection?.end && selection?.start === node.openStart;
+  const contentEndCaret =
+    activeSlotPath === slotPath &&
+    selection?.start === selection?.end &&
+    selection?.start === node.content.rawEnd &&
+    node.closeEnd !== node.content.rawEnd;
+  const afterCaret =
+    (activeSlotPath === slotPath || activeSlotPath === null) &&
+    selection?.start === selection?.end &&
+    selection?.start === node.closeEnd;
+
+  return (
+    <span key={key} className="pretty-expression-structural-group" data-slot-path={slotPath}>
+      {beforeCaret ? (
+        <span className="pretty-expression-caret-anchor" data-display-length={0} data-raw-end={node.openStart} data-raw-start={node.openStart}>
+          <span className="pretty-expression-caret" />
+        </span>
+      ) : null}
+      {renderNode(node.content, selection, `${key}-content`, `${path}/group/content`, activeSlotPath)}
+      {contentEndCaret ? (
+        <span className="pretty-expression-caret-anchor" data-display-length={0} data-raw-end={node.content.rawEnd} data-raw-start={node.content.rawEnd}>
+          <span className="pretty-expression-caret" />
+        </span>
+      ) : null}
+      {afterCaret ? (
+        <span className="pretty-expression-caret-anchor" data-display-length={0} data-raw-end={node.closeEnd ?? node.rawEnd} data-raw-start={node.closeEnd ?? node.rawEnd}>
+          <span className="pretty-expression-caret" />
+        </span>
+      ) : null}
+    </span>
+  );
+}
+
 function renderFunctionLabel(node: PrettyFunctionNode, selection: SelectionRange | null, key: string) {
   return (
     <span key={key} className="pretty-expression-function-label">
@@ -205,7 +247,7 @@ function renderFunctionLabel(node: PrettyFunctionNode, selection: SelectionRange
   );
 }
 
-function renderNode(node: PrettyNode, selection: SelectionRange | null, key: string, path: string): ReactNode {
+function renderNode(node: PrettyNode, selection: SelectionRange | null, key: string, path: string, activeSlotPath: string | null): ReactNode {
   switch (node.kind) {
     case "leaf":
       return renderLeaf(node, selection, key);
@@ -216,7 +258,7 @@ function renderNode(node: PrettyNode, selection: SelectionRange | null, key: str
     case "sequence":
       return (
         <span key={key} className="pretty-expression-sequence">
-          {node.children.map((child, index) => renderNode(child, selection, `${key}-${index}`, `${path}/${index}`))}
+          {node.children.map((child, index) => renderNode(child, selection, `${key}-${index}`, `${path}/${index}`, activeSlotPath))}
         </span>
       );
 
@@ -224,7 +266,7 @@ function renderNode(node: PrettyNode, selection: SelectionRange | null, key: str
       return (
         <span key={key} className="pretty-expression-group" data-slot-path={`${path}/group`}>
           {renderInteractiveLeaf("(", node.openStart, node.openEnd, selection, "pretty-expression-token-paren", `${key}-open`)}
-          {renderNode(node.content, selection, `${key}-content`, `${path}/group/content`)}
+          {renderNode(node.content, selection, `${key}-content`, `${path}/group/content`, activeSlotPath)}
           {node.closeStart !== null && node.closeEnd !== null
             ? renderInteractiveLeaf(")", node.closeStart, node.closeEnd, selection, "pretty-expression-token-paren", `${key}-close`)
             : null}
@@ -234,9 +276,11 @@ function renderNode(node: PrettyNode, selection: SelectionRange | null, key: str
     case "power":
       return (
         <span key={key} className="pretty-expression-power">
-          <span className="pretty-expression-power-base">{renderNode(node.base, selection, `${key}-base`, `${path}/base`)}</span>
+          <span className="pretty-expression-power-base">{renderNode(node.base, selection, `${key}-base`, `${path}/base`, activeSlotPath)}</span>
           <span className="pretty-expression-power-exponent" data-slot-path={`${path}/exp`}>
-            {renderNode(node.exponent, selection, `${key}-exp`, `${path}/exp/content`)}
+            {node.exponent.kind === "group"
+              ? renderHiddenGroup(node.exponent, selection, `${key}-exp`, `${path}/exp/content`, activeSlotPath)
+              : renderNode(node.exponent, selection, `${key}-exp`, `${path}/exp/content`, activeSlotPath)}
           </span>
         </span>
       );
@@ -245,7 +289,7 @@ function renderNode(node: PrettyNode, selection: SelectionRange | null, key: str
       return (
         <span key={key} className="pretty-expression-fraction">
           <span className="pretty-expression-fraction-numerator" data-slot-path={`${path}/num`}>
-            {renderNode(node.numerator, selection, `${key}-num`, `${path}/num/content`)}
+            {renderNode(node.numerator, selection, `${key}-num`, `${path}/num/content`, activeSlotPath)}
           </span>
           <span
             className="pretty-expression-fraction-line"
@@ -254,28 +298,43 @@ function renderNode(node: PrettyNode, selection: SelectionRange | null, key: str
             data-raw-start={node.slashStart}
           />
           <span className="pretty-expression-fraction-denominator" data-slot-path={`${path}/den`}>
-            {renderNode(node.denominator, selection, `${key}-den`, `${path}/den/content`)}
+            {node.denominator.kind === "group"
+              ? renderHiddenGroup(node.denominator, selection, `${key}-den`, `${path}/den/content`, activeSlotPath)
+              : renderNode(node.denominator, selection, `${key}-den`, `${path}/den/content`, activeSlotPath)}
           </span>
         </span>
       );
 
     case "function":
       if (node.functionType === "sqrt") {
+        const argument = node.args[0] ?? {
+          kind: "placeholder" as const,
+          placeholderType: "argument" as const,
+          rawStart: node.openEnd ?? node.rawEnd,
+          rawEnd: node.openEnd ?? node.rawEnd,
+        };
+        const afterCaret =
+          (activeSlotPath === null || activeSlotPath === `${path}/arg0`) &&
+          selection?.start === selection?.end &&
+          node.closeEnd !== null &&
+          selection?.start === node.closeEnd;
+
         return (
-          <span key={key} className="pretty-expression-sqrt">
+          <span key={key} className="pretty-expression-sqrt" data-slot-path={`${path}/arg0`}>
             {renderInteractiveLeaf("\u221a", node.nameStart, node.nameEnd, selection, "pretty-expression-token-function", `${key}-root`)}
-            {node.openStart !== null && node.openEnd !== null
-              ? renderInteractiveLeaf("(", node.openStart, node.openEnd, selection, "pretty-expression-token-paren", `${key}-open`)
-              : null}
-            {renderNode(
-              node.args[0] ?? { kind: "placeholder", placeholderType: "argument", rawStart: node.rawEnd, rawEnd: node.rawEnd },
-              selection,
-              `${key}-arg`,
-              `${path}/arg0/content`,
-            )}
-            {node.closeStart !== null && node.closeEnd !== null
-              ? renderInteractiveLeaf(")", node.closeStart, node.closeEnd, selection, "pretty-expression-token-paren", `${key}-close`)
-              : null}
+            <span className="pretty-expression-sqrt-radicand" data-slot-path={`${path}/arg0`}>
+              {renderNode(argument, selection, `${key}-arg`, `${path}/arg0/content`, activeSlotPath)}
+            </span>
+            {afterCaret ? (
+              <span
+                className="pretty-expression-caret-anchor"
+                data-display-length={0}
+                data-raw-end={node.closeEnd ?? node.rawEnd}
+                data-raw-start={node.closeEnd ?? node.rawEnd}
+              >
+                <span className="pretty-expression-caret" />
+              </span>
+            ) : null}
           </span>
         );
       }
@@ -294,6 +353,7 @@ function renderNode(node: PrettyNode, selection: SelectionRange | null, key: str
               selection,
               `${key}-arg`,
               `${path}/arg0/content`,
+              activeSlotPath,
             )}
             {renderInteractiveLeaf("|", rightStart, rightEnd, selection, "pretty-expression-token-abs", `${key}-right`)}
           </span>
@@ -310,6 +370,7 @@ function renderNode(node: PrettyNode, selection: SelectionRange | null, key: str
                 selection,
                 `${key}-base`,
                 `${path}/arg0/content`,
+                activeSlotPath,
               )}
             </span>
             <span className="pretty-expression-log-base-value" data-slot-path={`${path}/arg1`}>
@@ -318,8 +379,42 @@ function renderNode(node: PrettyNode, selection: SelectionRange | null, key: str
                 selection,
                 `${key}-value`,
                 `${path}/arg1/content`,
+                activeSlotPath,
               )}
             </span>
+          </span>
+        );
+      }
+
+      if (node.args.length <= 1 && (node.name === "ln" || node.name === "log" || node.name === "lg")) {
+        const argument = node.args[0] ?? {
+          kind: "placeholder" as const,
+          placeholderType: "argument" as const,
+          rawStart: node.openEnd ?? node.rawEnd,
+          rawEnd: node.openEnd ?? node.rawEnd,
+        };
+        const afterCaret =
+          (activeSlotPath === null || activeSlotPath === `${path}/arg0`) &&
+          selection?.start === selection?.end &&
+          node.closeEnd !== null &&
+          selection?.start === node.closeEnd;
+
+        return (
+          <span key={key} className="pretty-expression-function pretty-expression-function-slot" data-slot-path={`${path}/arg0`}>
+            {renderFunctionLabel(node, selection, `${key}-label`)}
+            <span className="pretty-expression-function-argument pretty-expression-function-argument-slot" data-slot-path={`${path}/arg0`}>
+              {renderNode(argument, selection, `${key}-arg-0`, `${path}/arg0/content`, activeSlotPath)}
+            </span>
+            {afterCaret ? (
+              <span
+                className="pretty-expression-caret-anchor"
+                data-display-length={0}
+                data-raw-end={node.closeEnd ?? node.rawEnd}
+                data-raw-start={node.closeEnd ?? node.rawEnd}
+              >
+                <span className="pretty-expression-caret" />
+              </span>
+            ) : null}
           </span>
         );
       }
@@ -337,7 +432,7 @@ function renderNode(node: PrettyNode, selection: SelectionRange | null, key: str
                     ? renderInteractiveLeaf(",", node.openEnd ?? node.rawStart, node.openEnd ?? node.rawStart, selection, "pretty-expression-token-comma", `${key}-comma-${index}`)
                     : null}
                   <span className="pretty-expression-function-argument" data-slot-path={`${path}/arg${index}`}>
-                    {renderNode(argument, selection, `${key}-arg-${index}`, `${path}/arg${index}/content`)}
+                    {renderNode(argument, selection, `${key}-arg-${index}`, `${path}/arg${index}/content`, activeSlotPath)}
                   </span>
                 </Fragment>
               ))
@@ -350,7 +445,13 @@ function renderNode(node: PrettyNode, selection: SelectionRange | null, key: str
   }
 }
 
-function resolvePointerTargetFromPoint(root: HTMLElement, clientX: number, clientY: number, fallback: number): MathFieldPointerTarget {
+function resolvePointerTargetFromPoint(
+  root: HTMLElement,
+  clientX: number,
+  clientY: number,
+  fallback: number,
+  eventTarget: EventTarget | null,
+): MathFieldPointerTarget {
   const documentRef = globalThis.document as (Document & {
     caretPositionFromPoint?: (x: number, y: number) => { offsetNode: Node; offset: number } | null;
     caretRangeFromPoint?: (x: number, y: number) => Range | null;
@@ -376,16 +477,21 @@ function resolvePointerTargetFromPoint(root: HTMLElement, clientX: number, clien
     offset = range?.startOffset ?? 0;
   }
 
-  const slotElement =
-    documentRef.elementFromPoint?.(clientX, clientY)?.closest?.<HTMLElement>("[data-slot-path]") ?? null;
+  const pointedElement =
+    eventTarget instanceof Element ? eventTarget : documentRef.elementFromPoint?.(clientX, clientY) ?? null;
+  const slotElement = pointedElement?.closest?.<HTMLElement>("[data-slot-path]") ?? null;
+  const pointedAnchor = pointedElement?.closest?.<HTMLElement>("[data-raw-start]") ?? null;
 
-  const anchor =
+  const caretAnchor =
     node?.nodeType === globalThis.Node.TEXT_NODE
       ? node.parentElement?.closest<HTMLElement>("[data-raw-start]")
       : (node as Element | null)?.closest?.<HTMLElement>("[data-raw-start]") ?? null;
+  const anchor = pointedAnchor ?? caretAnchor;
 
   if (!anchor && slotElement) {
-    const hits = Array.from(slotElement.querySelectorAll<HTMLElement>("[data-raw-start]"));
+    const allHits = Array.from(slotElement.querySelectorAll<HTMLElement>("[data-raw-start]"));
+    const visibleHits = allHits.filter((hit) => Number(hit.dataset.displayLength ?? Array.from(hit.textContent ?? "").length) > 0);
+    const hits = visibleHits.length ? visibleHits : allHits;
     if (hits.length) {
       const rawStart = Math.min(...hits.map((hit) => Number(hit.dataset.rawStart ?? fallback)));
       const rawEnd = Math.max(...hits.map((hit) => Number(hit.dataset.rawEnd ?? fallback)));
@@ -406,12 +512,16 @@ function resolvePointerTargetFromPoint(root: HTMLElement, clientX: number, clien
   const rawEnd = Number(anchor.dataset.rawEnd ?? fallback);
   const displayLength = Number(anchor.dataset.displayLength ?? Array.from(anchor.textContent ?? "").length);
   const slotPath = anchor.closest<HTMLElement>("[data-slot-path]")?.dataset.slotPath ?? slotElement?.dataset.slotPath ?? null;
+  const structuralSlot = anchor.closest<HTMLElement>(".pretty-expression-structural-group");
 
   if (node?.nodeType === globalThis.Node.TEXT_NODE) {
     return { rawIndex: toRawOffset(offset, rawStart, rawEnd, displayLength), slotPath };
   }
 
   const rect = anchor.getBoundingClientRect();
+  if (structuralSlot && displayLength <= 0) {
+    return { rawIndex: clientX <= rect.left + rect.width / 2 ? rawStart : rawEnd, slotPath };
+  }
   return { rawIndex: clientX <= rect.left + rect.width / 2 ? rawStart : rawEnd, slotPath };
 }
 
@@ -419,6 +529,7 @@ function PrettyExpressionComponent({
   expression,
   selectionStart,
   selectionEnd,
+  activeSlotPath = null,
   className = "",
   compact = false,
   onPointerDown,
@@ -426,22 +537,46 @@ function PrettyExpressionComponent({
   const selection =
     selectionStart !== undefined && selectionEnd !== undefined ? { start: selectionStart, end: selectionEnd } : null;
   const model = useMemo(() => buildPrettyExpression(expression), [expression]);
+  const rootRef = useRef<HTMLSpanElement | null>(null);
+
+  useLayoutEffect(() => {
+    const root = rootRef.current;
+    if (!root || !onPointerDown) {
+      return;
+    }
+
+    const handlePointerPlacement = (event: PointerEvent | MouseEvent) => {
+      event.preventDefault();
+      const targetElement = event.target;
+      if (!root.contains(targetElement as Node | null)) {
+        return;
+      }
+
+      const target = resolvePointerTargetFromPoint(
+        root,
+        event.clientX,
+        event.clientY,
+        expression.length,
+        targetElement,
+      );
+      onPointerDown(target, event as unknown as React.PointerEvent<HTMLSpanElement>);
+    };
+
+    root.addEventListener("pointerdown", handlePointerPlacement);
+    root.addEventListener("mousedown", handlePointerPlacement);
+    return () => {
+      root.removeEventListener("pointerdown", handlePointerPlacement);
+      root.removeEventListener("mousedown", handlePointerPlacement);
+    };
+  }, [expression.length, onPointerDown]);
 
   return (
     <span
+      ref={rootRef}
       className={`pretty-expression ${compact ? "pretty-expression-compact" : ""} ${className}`.trim()}
-      onPointerDown={
-        onPointerDown
-          ? (event) => {
-              event.preventDefault();
-              const target = resolvePointerTargetFromPoint(event.currentTarget, event.clientX, event.clientY, expression.length);
-              onPointerDown(target, event);
-            }
-          : undefined
-      }
       role="presentation"
     >
-      {renderNode(model, selection, "root", "root")}
+      {renderNode(model, selection, "root", "root", activeSlotPath)}
     </span>
   );
 }

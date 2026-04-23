@@ -11,6 +11,7 @@ export interface MathFieldSelectionState {
   start: number;
   end: number;
   activeSlotPath: string | null;
+  pendingAutoExponentPath?: string | null;
 }
 
 export interface MathFieldPointerTarget {
@@ -18,7 +19,7 @@ export interface MathFieldPointerTarget {
   slotPath: string | null;
 }
 
-type MathSlotKind = "group" | "numerator" | "denominator" | "exponent" | "argument";
+type MathSlotKind = "group" | "numerator" | "denominator" | "exponent" | "argument" | "logBase";
 
 interface MathSlotDescriptor {
   path: string;
@@ -33,6 +34,14 @@ interface MathSlotDescriptor {
 interface MathSlotIndex {
   slots: MathSlotDescriptor[];
   byPath: Map<string, MathSlotDescriptor>;
+}
+
+interface SlotBounds {
+  contentStart: number;
+  contentEnd: number;
+  outerStart: number;
+  outerEnd: number;
+  contentNode: PrettyNode;
 }
 
 const IMPLICIT_FUNCTION_NAMES = new Set([
@@ -67,8 +76,13 @@ const IMPLICIT_TOKEN_PREFIXES = Array.from(IMPLICIT_TOKEN_NAMES).flatMap((name) 
   Array.from({ length: name.length }, (_, index) => name.slice(0, index + 1)),
 );
 
-function makeSelection(start: number, end = start, activeSlotPath: string | null = null): MathFieldSelectionState {
-  return { start, end, activeSlotPath };
+function makeSelection(
+  start: number,
+  end = start,
+  activeSlotPath: string | null = null,
+  pendingAutoExponentPath: string | null = null,
+): MathFieldSelectionState {
+  return { start, end, activeSlotPath, pendingAutoExponentPath };
 }
 
 function slotDepth(path: string): number {
@@ -86,6 +100,26 @@ function appendSlot(
 ) {
   slots.push(descriptor);
   byPath.set(descriptor.path, descriptor);
+}
+
+function getWrappedSlotBounds(node: PrettyNode): SlotBounds {
+  if (node.kind === "group") {
+    return {
+      contentStart: node.content.rawStart,
+      contentEnd: node.content.rawEnd,
+      outerStart: node.openStart,
+      outerEnd: node.closeEnd ?? node.content.rawEnd,
+      contentNode: node.content,
+    };
+  }
+
+  return {
+    contentStart: node.rawStart,
+    contentEnd: node.rawEnd,
+    outerStart: node.rawStart,
+    outerEnd: node.rawEnd,
+    contentNode: node,
+  };
 }
 
 function collectSlots(
@@ -121,17 +155,18 @@ function collectSlots(
 
     case "power": {
       const exponentPath = `${nodePath}/exp`;
+      const exponentBounds = getWrappedSlotBounds(node.exponent);
       appendSlot(slots, byPath, {
         path: exponentPath,
         kind: "exponent",
         parentPath: containerSlotPath,
-        contentStart: node.exponent.rawStart,
-        contentEnd: node.exponent.rawEnd,
-        outerStart: node.exponent.rawStart,
-        outerEnd: node.exponent.rawEnd,
+        contentStart: exponentBounds.contentStart,
+        contentEnd: exponentBounds.contentEnd,
+        outerStart: exponentBounds.outerStart,
+        outerEnd: exponentBounds.outerEnd,
       });
       collectSlots(node.base, `${nodePath}/base`, containerSlotPath, slots, byPath);
-      collectSlots(node.exponent, `${exponentPath}/content`, exponentPath, slots, byPath);
+      collectSlots(exponentBounds.contentNode, `${exponentPath}/content`, exponentPath, slots, byPath);
       return;
     }
 
@@ -185,16 +220,17 @@ function collectSlots(
     case "function": {
       node.args.forEach((argument, index) => {
         const argumentPath = `${nodePath}/arg${index}`;
+        const argumentBounds = getWrappedSlotBounds(argument);
         appendSlot(slots, byPath, {
           path: argumentPath,
-          kind: "argument",
+          kind: node.functionType === "logBase" && index === 0 ? "logBase" : "argument",
           parentPath: containerSlotPath,
-          contentStart: argument.rawStart,
-          contentEnd: argument.rawEnd,
-          outerStart: argument.rawStart,
-          outerEnd: argument.rawEnd,
+          contentStart: argumentBounds.contentStart,
+          contentEnd: argumentBounds.contentEnd,
+          outerStart: argumentBounds.outerStart,
+          outerEnd: argumentBounds.outerEnd,
         });
-        collectSlots(argument, `${argumentPath}/content`, argumentPath, slots, byPath);
+        collectSlots(argumentBounds.contentNode, `${argumentPath}/content`, argumentPath, slots, byPath);
       });
       return;
     }
@@ -269,6 +305,15 @@ function findSlotWithOuterEnd(index: MathSlotIndex, position: number): MathSlotD
   return matches[0] ?? null;
 }
 
+function getArgumentSibling(index: MathSlotIndex, path: string, direction: -1 | 1): MathSlotDescriptor | null {
+  const match = /^(.*\/arg)(\d+)$/.exec(path);
+  if (!match) {
+    return null;
+  }
+
+  return index.byPath.get(`${match[1]}${Number(match[2]) + direction}`) ?? null;
+}
+
 function isSimpleCollapsibleNode(node: PrettyNode): boolean {
   switch (node.kind) {
     case "leaf":
@@ -303,6 +348,17 @@ function collectSimpleFractionGroupRanges(node: PrettyNode, ranges: Array<{ star
 
     case "power":
       collectSimpleFractionGroupRanges(node.base, ranges);
+      if (
+        node.exponent.kind === "group" &&
+        node.exponent.closeStart !== null &&
+        node.exponent.closeEnd !== null &&
+        isSimpleCollapsibleNode(node.exponent.content)
+      ) {
+        ranges.push({ start: node.exponent.openStart, end: node.exponent.openEnd });
+        ranges.push({ start: node.exponent.closeStart, end: node.exponent.closeEnd });
+        collectSimpleFractionGroupRanges(node.exponent.content, ranges);
+        return;
+      }
       collectSimpleFractionGroupRanges(node.exponent, ranges);
       return;
 
@@ -389,7 +445,12 @@ export function applyMathFieldCharacter(
     return {
       handled: true,
       raw: updated,
-      next: makeSelection(position, position, resolveActiveSlotPath(updated, position, selection.activeSlotPath)),
+      next: makeSelection(
+        position,
+        position,
+        resolveActiveSlotPath(updated, position, selection.activeSlotPath),
+        selection.pendingAutoExponentPath ?? null,
+      ),
     };
   }
 
@@ -403,31 +464,42 @@ export function applyMathFieldCharacter(
     };
   }
 
-  const index = buildSlotIndex(raw);
-  const active = resolvePreferredSlot(index, selection.start, selection.activeSlotPath);
-
-  if (active?.kind === "exponent" && selection.start === active.contentEnd && ["+", "-", "*", "/"].includes(normalizedKey)) {
-    const parentState = makeSelection(selection.start, selection.start, active.parentPath);
-    if (normalizedKey === "/") {
-      return applyMathFieldCharacter(raw, parentState, normalizedKey);
-    }
-
-    const updated = `${raw.slice(0, selection.start)}${normalizedKey}${raw.slice(selection.end)}`;
-    const position = selection.start + normalizedKey.length;
+  if (normalizedKey === "^") {
+    const updated = `${raw.slice(0, selection.start)}^()${raw.slice(selection.end)}`;
+    const position = selection.start + 2;
+    const exponentPath = resolveActiveSlotPath(updated, position, null);
     return {
       handled: true,
       raw: updated,
-      next: makeSelection(position, position, resolveActiveSlotPath(updated, position, active.parentPath)),
+      next: makeSelection(position, position, exponentPath, exponentPath),
     };
   }
 
+  if (/^[a-z0-9]$/i.test(normalizedKey) && raw.slice(0, selection.start).toLowerCase().endsWith("sqrt")) {
+    const functionStart = selection.start - 4;
+    const updated = `${raw.slice(0, functionStart)}sqrt(${normalizedKey})${raw.slice(selection.end)}`;
+    const position = functionStart + `sqrt(${normalizedKey}`.length;
+    return {
+      handled: true,
+      raw: updated,
+      next: makeSelection(position, position, resolveActiveSlotPath(updated, position, null)),
+    };
+  }
+
+  const index = buildSlotIndex(raw);
+  const active = resolvePreferredSlot(index, selection.start, selection.activeSlotPath);
+
   if (
     normalizedKey === "(" &&
-    active?.kind === "denominator" &&
+    (active?.kind === "denominator" || active?.kind === "exponent") &&
     active.contentStart === active.contentEnd &&
     selection.start === active.contentStart
   ) {
-    return { handled: true, raw, next: selection };
+    return {
+      handled: true,
+      raw,
+      next: makeSelection(selection.start, selection.end, selection.activeSlotPath, null),
+    };
   }
 
   if (normalizedKey === ")" && active && selection.start === active.contentEnd && active.outerEnd > active.contentEnd) {
@@ -448,6 +520,7 @@ export function applyMathFieldCharacter(
       position,
       position,
       resolveActiveSlotPath(updated, position, prefix ? null : selection.activeSlotPath),
+      selection.pendingAutoExponentPath === active?.path ? selection.pendingAutoExponentPath : null,
     ),
   };
 }
@@ -469,8 +542,16 @@ export function moveMathFieldSelection(
 
   if (direction === "right") {
     if (active && selection.start === active.contentEnd) {
+      if (active.kind === "logBase") {
+        const nextArgument = getArgumentSibling(index, active.path, 1);
+        if (nextArgument) {
+          return makeSelection(nextArgument.contentStart, nextArgument.contentStart, nextArgument.path);
+        }
+      }
+
       if (active.kind === "exponent" && active.parentPath) {
-        return makeSelection(selection.start, selection.start, active.parentPath);
+        const nextPosition = active.outerEnd > active.contentEnd ? active.outerEnd : selection.start;
+        return makeSelection(nextPosition, nextPosition, active.parentPath);
       }
 
       if (active.kind === "denominator") {
@@ -488,6 +569,26 @@ export function moveMathFieldSelection(
     return null;
   }
 
+  if (active?.kind === "argument" && selection.start === active.contentStart) {
+    const previousArgument = getArgumentSibling(index, active.path, -1);
+    if (previousArgument) {
+      return makeSelection(previousArgument.contentEnd, previousArgument.contentEnd, previousArgument.path);
+    }
+  }
+
+  if (active?.kind === "exponent") {
+    if (selection.start > active.contentStart) {
+      return null;
+    }
+
+    if (active.parentPath) {
+      const parent = index.byPath.get(active.parentPath);
+      if (parent) {
+        return makeSelection(parent.contentStart, parent.contentStart, parent.path);
+      }
+    }
+  }
+
   if (active) {
     const child = findDeepestChildEndingAt(index, active.path, selection.start);
     if (child) {
@@ -501,8 +602,55 @@ export function moveMathFieldSelection(
   }
 
   const reentry = findDeepestSlotEndingAt(index, selection.start);
-  if (reentry) {
+  if (reentry && reentry.path !== active?.path) {
     return makeSelection(selection.start, selection.start, reentry.path);
+  }
+
+  return null;
+}
+
+export function applyMathFieldBackspace(
+  raw: string,
+  state: MathFieldSelectionState,
+): { handled: boolean; raw: string; next: MathFieldSelectionState } | null {
+  const selection = clampSelection(raw, state);
+  if (!isCollapsed(selection)) {
+    return null;
+  }
+
+  const index = buildSlotIndex(raw);
+  const active =
+    resolvePreferredSlot(index, selection.start, selection.activeSlotPath) ??
+    resolveDeepestSlot(index, selection.start);
+
+  if (!active) {
+    return null;
+  }
+
+  if (active.kind === "argument" && selection.start === active.contentStart) {
+    const previousArgument = getArgumentSibling(index, active.path, -1);
+    if (previousArgument) {
+      return {
+        handled: true,
+        raw,
+        next: makeSelection(previousArgument.contentEnd, previousArgument.contentEnd, previousArgument.path),
+      };
+    }
+  }
+
+  if (
+    (active.kind === "logBase" ||
+      active.kind === "argument" ||
+      active.kind === "denominator" ||
+      active.kind === "exponent" ||
+      active.kind === "group") &&
+    selection.start === active.contentStart
+  ) {
+    return {
+      handled: true,
+      raw,
+      next: makeSelection(selection.start, selection.start, active.path, state.pendingAutoExponentPath ?? null),
+    };
   }
 
   return null;

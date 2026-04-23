@@ -568,7 +568,7 @@ function renderSymbolTex(name: string): string {
 
 function renderTextFunction(name: string, args: RenderNode[]): string {
   if (name === "sqrt") {
-    return args[0] ? `\u221a(${renderTextNode(args[0])})` : "\u221a()";
+    return args[0] ? `\u221a${wrapUnaryTextArgument(args[0])}` : "\u221a";
   }
 
   if (name === "abs") {

@@ -84,6 +84,9 @@ export function TemplateKeyboard({ onInsert }: TemplateKeyboardProps) {
                     key={`${group.title}-${item.label}`}
                     className="keyboard-button"
                     onClick={() => onInsert(item.template)}
+                    onMouseDown={(event) => {
+                      event.preventDefault();
+                    }}
                   >
                     {item.label}
                   </Button>
