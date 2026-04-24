@@ -314,6 +314,16 @@ function getArgumentSibling(index: MathSlotIndex, path: string, direction: -1 | 
   return index.byPath.get(`${match[1]}${Number(match[2]) + direction}`) ?? null;
 }
 
+function getFractionSibling(index: MathSlotIndex, path: string, targetKind: "numerator" | "denominator"): MathSlotDescriptor | null {
+  const match = /^(.*\/)(num|den)$/.exec(path);
+  if (!match) {
+    return null;
+  }
+
+  const siblingSuffix = targetKind === "numerator" ? "num" : "den";
+  return index.byPath.get(`${match[1]}${siblingSuffix}`) ?? null;
+}
+
 function isSimpleCollapsibleNode(node: PrettyNode): boolean {
   switch (node.kind) {
     case "leaf":
@@ -542,6 +552,13 @@ export function moveMathFieldSelection(
 
   if (direction === "right") {
     if (active && selection.start === active.contentEnd) {
+      if (active.kind === "numerator") {
+        const denominator = getFractionSibling(index, active.path, "denominator");
+        if (denominator) {
+          return makeSelection(denominator.contentStart, denominator.contentStart, denominator.path);
+        }
+      }
+
       if (active.kind === "logBase") {
         const nextArgument = getArgumentSibling(index, active.path, 1);
         if (nextArgument) {
@@ -573,6 +590,13 @@ export function moveMathFieldSelection(
     const previousArgument = getArgumentSibling(index, active.path, -1);
     if (previousArgument) {
       return makeSelection(previousArgument.contentEnd, previousArgument.contentEnd, previousArgument.path);
+    }
+  }
+
+  if (active?.kind === "denominator" && selection.start === active.contentStart) {
+    const numerator = getFractionSibling(index, active.path, "numerator");
+    if (numerator) {
+      return makeSelection(numerator.contentEnd, numerator.contentEnd, numerator.path);
     }
   }
 
