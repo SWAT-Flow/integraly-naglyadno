@@ -449,7 +449,7 @@ export const LEARNING_MODULES: LearningModule[] = [
         {
           id: "m5-medium",
           level: "Средний",
-          prompt: "Покажите по свойству аддитивности, что {{tex:\\int_0^3 x\\,dx = \\int_0^1 x\\,dx + \\int_1^3 x\\,dx}} и найдите число.",
+          prompt: "Докажите по свойству аддитивности, что {{tex:\\int_0^3 x\\,dx = \\int_0^1 x\\,dx + \\int_1^3 x\\,dx}} и найдите число.",
           answer: "Ответ: {{tex:\\frac92}}.",
           solution:
             "Левая часть равна {{tex:\\left.\\frac{x^2}{2}\\right|_0^3 = \\frac92}}. Правая часть: {{tex:\\frac12 + 4 = \\frac92}}.",
