@@ -112,7 +112,10 @@ button {
   min-width: 0;
 }
 
-.left-column,
+.left-column {
+  overflow: hidden;
+}
+
 .right-column {
   overflow: auto;
   padding-right: 4px;
@@ -456,26 +459,42 @@ button {
 .expression-list {
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  gap: 0;
 }
 
 .expression-row {
-  border: 1px solid #d9e2ec;
-  border-radius: 20px;
-  background: #fbfdff;
-  padding: 14px 16px;
+  border: none;
+  border-bottom: 1px solid #334155;
+  border-radius: 0;
+  border-left: 4px solid transparent;
+  background: transparent;
+  padding: 10px 14px 10px 0;
+  transition: background 0.15s ease, border-color 0.15s ease;
+}
+
+.expression-row:hover {
+  background: rgba(255, 255, 255, 0.04);
 }
 
 .expression-row-active {
-  border-color: #93c5fd;
-  box-shadow: inset 0 0 0 1px #bfdbfe;
+  border-left-color: #3b82f6;
+  background: rgba(59, 130, 246, 0.08);
 }
 
 .expression-main {
   display: grid;
-  grid-template-columns: 18px minmax(0, 1fr) 40px 40px;
-  gap: 12px;
+  grid-template-columns: 28px 18px minmax(0, 1fr) auto auto;
+  gap: 8px;
   align-items: center;
+}
+
+.expression-row-number {
+  color: #64748b;
+  font-size: 13px;
+  font-weight: 500;
+  text-align: center;
+  user-select: none;
+  font-variant-numeric: tabular-nums;
 }
 
 .expression-entry {
@@ -488,7 +507,7 @@ button {
   border: none;
   border-radius: 999px;
   cursor: pointer;
-  box-shadow: inset 0 0 0 2px rgba(255, 255, 255, 0.86), 0 0 0 1px rgba(148, 163, 184, 0.32);
+  box-shadow: inset 0 0 0 2px rgba(255, 255, 255, 0.3), 0 0 0 1px rgba(148, 163, 184, 0.2);
 }
 
 .expression-input {
@@ -499,6 +518,7 @@ button {
   outline: none;
   background: transparent;
   font-size: 15px;
+  color: #e2e8f0;
 }
 
 .expression-input-hidden {
@@ -511,27 +531,27 @@ button {
 
 .expression-editor-shell {
   position: relative;
-  min-height: 64px;
+  min-height: 48px;
 }
 
 .expression-editor-display {
   display: flex;
   align-items: center;
-  gap: 12px;
-  min-height: 64px;
-  padding: 6px 0;
-  color: #0f172a;
+  gap: 10px;
+  min-height: 48px;
+  padding: 4px 0;
+  color: #e2e8f0;
   user-select: none;
 }
 
 .expression-editor-display-empty {
-  color: #94a3b8;
+  color: #64748b;
 }
 
 .expression-editor-prefix,
 .expression-display-prefix {
   flex: 0 0 auto;
-  color: #475569;
+  color: #94a3b8;
   font-size: 15px;
   font-weight: 600;
   line-height: 1.5;
@@ -554,18 +574,18 @@ button {
   display: inline-flex;
   align-items: center;
   gap: 0;
-  min-height: 38px;
+  min-height: 34px;
   min-width: 0;
   flex: 1 1 auto;
   border: none;
   background: transparent;
   padding: 0;
-  color: #94a3b8;
+  color: #475569;
   text-align: left;
 }
 
 .expression-editor-placeholder-text {
-  color: #94a3b8;
+  color: #475569;
 }
 
 .pretty-expression {
@@ -574,7 +594,7 @@ button {
   align-items: flex-start;
   gap: 0;
   min-width: 0;
-  color: #0f172a;
+  color: #e2e8f0;
   font-size: 20px;
   line-height: 1.42;
 }
@@ -610,7 +630,7 @@ button {
 }
 
 .pretty-expression-hit-selected {
-  background: rgba(37, 99, 235, 0.16);
+  background: rgba(59, 130, 246, 0.28);
 }
 
 .pretty-expression-token-operator {
@@ -636,7 +656,7 @@ button {
   width: 1.5px;
   height: 1.12em;
   margin: 0 -0.75px;
-  background: #020617;
+  background: #3b82f6;
   border-radius: 999px;
   animation: expression-caret-blink 1s steps(1, end) infinite;
   vertical-align: baseline;
@@ -777,11 +797,11 @@ button {
   align-items: flex-start;
   gap: 10px;
   width: 100%;
-  min-height: 36px;
+  min-height: 32px;
   padding: 0;
   border: none;
   background: transparent;
-  color: #0f172a;
+  color: #e2e8f0;
   text-align: left;
 }
 
@@ -819,23 +839,39 @@ button {
   white-space: nowrap;
   font-size: 18px;
   line-height: 1.45;
-  color: #0f172a;
+  color: #e2e8f0;
 }
 
 .expression-display-empty {
-  color: #94a3b8;
+  color: #475569;
 }
 
 .expression-action {
-  width: 40px;
-  height: 40px;
-  border-radius: 12px;
-  font-size: 16px;
+  width: 32px;
+  height: 32px;
+  border-radius: 8px;
+  font-size: 14px;
+  opacity: 0;
+  transition: opacity 0.15s ease, background 0.15s ease;
+  background: transparent;
+  border-color: transparent;
+  color: #94a3b8;
+}
+
+.expression-row:hover .expression-action,
+.expression-row-active .expression-action {
+  opacity: 1;
+}
+
+.expression-action:hover {
+  background: rgba(255, 255, 255, 0.1);
+  color: #e2e8f0;
 }
 
 .expression-error {
-  margin-top: 8px;
-  color: #be123c;
+  margin-top: 6px;
+  margin-left: 56px;
+  color: #fb7185;
   font-size: 12px;
   line-height: 1.5;
 }
@@ -844,8 +880,8 @@ button {
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
-  margin-top: 10px;
-  padding-left: 30px;
+  margin-top: 8px;
+  padding-left: 56px;
 }
 
 .expression-color-option {
@@ -854,27 +890,27 @@ button {
   border: none;
   border-radius: 999px;
   cursor: pointer;
-  box-shadow: inset 0 0 0 2px rgba(255, 255, 255, 0.86), 0 0 0 1px rgba(148, 163, 184, 0.42);
+  box-shadow: inset 0 0 0 2px rgba(255, 255, 255, 0.3), 0 0 0 1px rgba(148, 163, 184, 0.2);
 }
 
 .expression-color-option-active {
-  box-shadow: inset 0 0 0 2px rgba(255, 255, 255, 0.92), 0 0 0 2px #1d4ed8;
+  box-shadow: inset 0 0 0 2px rgba(255, 255, 255, 0.5), 0 0 0 2px #3b82f6;
 }
 
 .keyboard-groups {
   display: flex;
   flex-direction: column;
-  gap: 18px;
+  gap: 12px;
 }
 
 .keyboard-group {
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  gap: 6px;
 }
 
 .keyboard-title {
-  color: #60738d;
+  color: #64748b;
   font-size: 11px;
   font-weight: 700;
   text-transform: uppercase;
@@ -884,24 +920,132 @@ button {
 .keyboard-buttons {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 6px;
+  gap: 4px;
 }
 
 .keyboard-button {
-  min-height: 40px;
-  border-radius: 4px;
-  border-color: #cfd6e2;
-  background: linear-gradient(180deg, #f7f7f7 0%, #ededed 100%);
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.8);
-  padding: 8px 6px;
+  min-height: 36px;
+  border-radius: 6px;
+  border-color: #475569;
+  background: #334155;
+  box-shadow: none;
+  padding: 6px 6px;
   font-size: 12px;
   font-weight: 500;
   text-align: center;
   white-space: nowrap;
+  color: #e2e8f0;
 }
 
 .keyboard-button:hover {
-  background: linear-gradient(180deg, #fcfcfc 0%, #f0f0f0 100%);
+  background: #475569;
+}
+
+.keyboard-toggle {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  width: 100%;
+  padding: 8px 0;
+  border: none;
+  border-top: 1px solid #334155;
+  background: transparent;
+  color: #64748b;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: color 0.15s ease;
+}
+
+.keyboard-toggle:hover {
+  color: #94a3b8;
+}
+
+.keyboard-toggle-icon {
+  transition: transform 0.2s ease;
+}
+
+.keyboard-toggle-icon-open {
+  transform: rotate(180deg);
+}
+
+/* Ghost add row */
+.expression-add-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 12px 14px;
+  border: none;
+  border-bottom: 1px solid #334155;
+  background: transparent;
+  color: #475569;
+  font-size: 14px;
+  cursor: pointer;
+  transition: color 0.15s ease, background 0.15s ease;
+  border-left: 4px solid transparent;
+}
+
+.expression-add-row:hover {
+  background: rgba(255, 255, 255, 0.04);
+  color: #94a3b8;
+}
+
+.expression-add-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  font-size: 18px;
+  font-weight: 300;
+}
+
+/* Dark panel container */
+.expression-panel {
+  display: flex;
+  flex-direction: column;
+  background: #1e293b;
+  border-radius: 16px;
+  border: 1px solid #334155;
+  overflow: hidden;
+}
+
+.expression-panel-scroll {
+  flex: 1 1 auto;
+  overflow-y: auto;
+  overflow-x: hidden;
+  scrollbar-width: thin;
+  scrollbar-color: #475569 #1e293b;
+}
+
+.expression-panel-scroll::-webkit-scrollbar {
+  width: 6px;
+}
+
+.expression-panel-scroll::-webkit-scrollbar-track {
+  background: #1e293b;
+}
+
+.expression-panel-scroll::-webkit-scrollbar-thumb {
+  background: #475569;
+  border-radius: 999px;
+}
+
+.expression-panel-keyboard {
+  border-top: 1px solid #334155;
+  padding: 12px;
+  background: #1e293b;
+}
+
+.keyboard-card {
+  border-radius: 0;
+  border: none;
+  background: transparent;
+}
+
+.keyboard-card-body {
+  padding: 0;
 }
 
 .sqrt-key-symbol {

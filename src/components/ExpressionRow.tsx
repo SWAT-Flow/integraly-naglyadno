@@ -16,6 +16,7 @@ interface ExpressionRowProps {
   active: boolean;
   editorRequest: number;
   availableColors: string[];
+  rowIndex: number;
   onActivate: () => void;
   onChange: (value: string) => void;
   onChangeColor: (color: string) => void;
@@ -40,6 +41,7 @@ function ExpressionRowComponent({
   active,
   editorRequest,
   availableColors,
+  rowIndex,
   onActivate,
   onChange,
   onChangeColor,
@@ -166,6 +168,7 @@ function ExpressionRowComponent({
   return (
     <div ref={rowRef} className={`expression-row ${active ? "expression-row-active" : ""}`}>
       <div className="expression-main">
+        <span className="expression-row-number">{rowIndex}</span>
         <button
           aria-label={selectRowLabel}
           className="expression-swatch"

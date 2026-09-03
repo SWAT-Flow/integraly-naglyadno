@@ -327,6 +327,7 @@ export default function App() {
               editorRequest={editorRequest}
               expressions={expressionState.rows}
               inputRefs={inputRefs}
+              keyboardSlot={<TemplateKeyboard onInsert={insertTemplate} />}
               onActivate={(id) => {
                 setActiveId(id);
                 setEditorRequest((current) => current + 1);
@@ -379,7 +380,6 @@ export default function App() {
                 );
               }}
             />
-            <TemplateKeyboard onInsert={insertTemplate} />
           </aside>
 
           <section className="center-column">
